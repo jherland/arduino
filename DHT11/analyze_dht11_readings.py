@@ -2,6 +2,7 @@
 
 import sys
 import time
+import Gnuplot
 
 timeformat = "%Y-%m-%d %H:%M:%S"
 
@@ -86,3 +87,39 @@ print "Read %u samples from between %s and %s (%.1f %s)" % (
 	elapsed, unit)
 print "Min/Avg/Max humidity:    %2.1f/%2.1f/%2.1f %%" % (h_min, h_avg, h_max)
 print "Min/Avg/Max temperature: %2.1f/%2.1f/%2.1f C" % (t_min, t_avg, t_max)
+
+
+# Generate data file for Gnuplot
+datafile = "./gnuplot.data"
+f = open(datafile, "w")
+for ts, h, t in zip(time_samples, h_samples, t_samples):
+	print >>f, time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)), \
+		h, t
+f.close()
+
+# Draw gnuplot graph
+g = Gnuplot.Gnuplot()
+g('set term svg size 1920,1080 dynamic')
+g('set out "%s.svg"' % (logfile))
+g('set title "Relative humidity/temperature readings from %s to %s \\n'
+	'(%u samples over %.1f %s)"' % (
+		time.strftime(timeformat, time.localtime(start_ts)),
+		time.strftime(timeformat, time.localtime(end_ts)),
+		len(time_samples), elapsed, unit))
+g('set xlabel "Time"')
+g('set ylabel "Humidity [%]"')
+g('set y2label "Temperature [C]"')
+g('set ytics nomirror')
+g('set yrange [10 : 90]')
+g('set ytics 10 10')
+g('set mytics 2')
+g('set y2range [10 : 40]')
+g('set y2tics 10, 5')
+g('set my2tics 5')
+g('set grid x y')
+g('set xdata time')
+g('set timefmt "%Y-%m-%dT%H:%M:%S"')
+g('plot  "%s" using 1:2 axis x1y1 title "Humidity [%%]" with lines,'
+	'25 axis x1y1 title "Min. comfortable humidity (25%%)" with lines,'
+	'"%s" using 1:3 axis x1y2 title "Temperature [C]" with lines'
+	% (datafile, datafile))
