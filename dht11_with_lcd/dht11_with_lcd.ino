@@ -14,14 +14,31 @@
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
 // DHT11 signal pin is connected to this analog port
-#define DHT11_PIN 0
+const unsigned int DHT11_PIN = 0;
+
+// Current datagram from DHT11 (2B humidity, 2B temperature, 1B checksum)
+byte dht11_dat[5];
+
+void setup()
+{
+	// Set DHT11 port as output port with initial value '1'
+	DDRC |= _BV(DHT11_PIN);
+	PORTC |= _BV(DHT11_PIN);
+
+	// Initialize serial port
+	Serial.begin(9600);
+	Serial.println("Ready");
+
+	// Set up 16x2 LCD panel
+	lcd.begin(16, 2);
+}
+
 
 byte read_dht11_dat()
 {
 	byte i = 0;
 	byte result = 0;
-	for (i = 0; i < 8; i++)
-	{
+	for (i = 0; i < 8; i++) {
 		// wait forever until analog input port 0 is '1'
 		// (NOTICE: PINC reads all the analog input ports
 		// and _BV(X) is the macro operation which pull up
@@ -40,24 +57,8 @@ byte read_dht11_dat()
 }
 
 
-void setup()
+boolean acquire_dht11_sample()
 {
-	// Set DHT11 port as output port with initial value '1'
-	DDRC |= _BV(DHT11_PIN);
-	PORTC |= _BV(DHT11_PIN);
-
-	// Initialize serial port
-	Serial.begin(9600);
-	Serial.println("Ready");
-
-	// Set up 16x2 LCD panel
-	lcd.begin(16, 2);
-}
-
-
-void loop()
-{
-	byte dht11_dat[5];
 	byte dht11_in;
 	byte i; // start condition
 
@@ -69,19 +70,18 @@ void loop()
 	delayMicroseconds(40);
 
 	dht11_in = PINC & _BV(DHT11_PIN); // read only the input port 0
-	if (dht11_in)
-	{
+	if (dht11_in) {
 		// wait for DHT response signal: LOW
 		Serial.println("dht11 start condition 1 not met");
 		delay(1000);
-		return;
+		return false;
 	}
 	delayMicroseconds(80);
 	dht11_in = PINC & _BV(DHT11_PIN);
 	if (!dht11_in) {
 		// wait for second response signal: HIGH
 		Serial.println("dht11 start condition 2 not met");
-		return;
+		return false;
 	}
 
 	delayMicroseconds(80); // now ready for data reception
@@ -99,6 +99,12 @@ void loop()
 	if (dht11_dat[4] != dht11_check_sum)
 		Serial.println("DHT11 checksum error");
 
+	return true;
+}
+
+
+void serial_output()
+{
 	// report humidity and temperature on serial port
 	Serial.print("Current humdity = ");
 	Serial.print(dht11_dat[0], DEC);
@@ -110,18 +116,23 @@ void loop()
 	Serial.print(".");
 	Serial.print(dht11_dat[3], DEC);
 	Serial.println("C  ");
+}
+
+
+void lcd_output(int minutes, int seconds)
+{
+	byte humidity = dht11_dat[0];
+	byte temperature = dht11_dat[2];
 
 	// print humidity on lcd
 	lcd.setCursor(0, 0);
 	lcd.print("Humd.: ");
-	if (dht11_dat[0] < 10)
+	if (humidity < 10)
 		lcd.print(" ");
-	lcd.print(dht11_dat[0]);
+	lcd.print(humidity);
 	lcd.print("%");
 
 	// print runtime on lcd
-	int minutes = millis() / 60000;
-	int seconds = (millis() / 1000) % 60;
 	if (minutes < 100) {
 		lcd.print(" ");
 		if (minutes < 10)
@@ -136,10 +147,25 @@ void loop()
 	// print temperature on lcd
 	lcd.setCursor(0, 1);
 	lcd.print("Temp.: ");
-	if (dht11_dat[2] < 10)
+	if (temperature < 10)
 		lcd.print(" ");
-	lcd.print(dht11_dat[2]);
+	lcd.print(temperature);
 	lcd.print("C ");
+}
+
+
+void loop()
+{
+	if (!acquire_dht11_sample())
+		return;
+
+	serial_output();
+
+	unsigned long runtime = millis();
+	unsigned long minutes = runtime / 60000;
+	unsigned long seconds = (runtime / 1000) % 60;
+
+	lcd_output(minutes, seconds);
 
 	// wait 2 seconds until next reading
 	delay(2000);
