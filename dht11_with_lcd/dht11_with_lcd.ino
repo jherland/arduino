@@ -19,6 +19,14 @@ const unsigned int DHT11_PIN = 0;
 // Current datagram from DHT11 (2B humidity, 2B temperature, 1B checksum)
 byte dht11_dat[5];
 
+int cur_minute;
+int humd_sum;
+int temp_sum;
+int nsamples;
+float humd_avg;
+float temp_avg;
+
+
 void setup()
 {
 	// Set DHT11 port as output port with initial value '1'
@@ -31,6 +39,13 @@ void setup()
 
 	// Set up 16x2 LCD panel
 	lcd.begin(16, 2);
+
+	cur_minute = millis() / 60000;
+	humd_sum = 0;
+	temp_sum = 0;
+	nsamples = 0;
+	humd_avg = 0;
+	temp_avg = 0;
 }
 
 
@@ -103,7 +118,26 @@ boolean acquire_dht11_sample()
 }
 
 
-void serial_output()
+boolean update_avg(int minutes)
+{
+	nsamples += 1;
+	humd_sum += dht11_dat[0];
+	temp_sum += dht11_dat[2];
+
+	if (minutes == cur_minute)
+		return false;
+
+	humd_avg = (float) humd_sum / (float) nsamples;
+	temp_avg = (float) temp_sum / (float) nsamples;
+	cur_minute = minutes;
+	nsamples = 0;
+	humd_sum = 0;
+	temp_sum = 0;
+	return true;
+}
+
+
+void serial_output(boolean updated)
 {
 	// report humidity and temperature on serial port
 	Serial.print("Current humdity = ");
@@ -116,6 +150,14 @@ void serial_output()
 	Serial.print(".");
 	Serial.print(dht11_dat[3], DEC);
 	Serial.println("C  ");
+	if (updated) {
+		Serial.print("Average humidity last minute: ");
+		Serial.print(humd_avg);
+		Serial.println("%");
+		Serial.print("Average temperature last minute: ");
+		Serial.print(temp_avg);
+		Serial.println("C");
+	}
 }
 
 
@@ -132,6 +174,10 @@ void lcd_output(int minutes, int seconds)
 	lcd.print(humidity);
 	lcd.print("%");
 
+	// print average humidity last minute
+	lcd.print(" ");
+	lcd.print(humd_avg);
+/*
 	// print runtime on lcd
 	if (minutes < 100) {
 		lcd.print(" ");
@@ -143,6 +189,7 @@ void lcd_output(int minutes, int seconds)
 	if (seconds < 10)
 		lcd.print(0);
 	lcd.print(seconds);
+*/
 
 	// print temperature on lcd
 	lcd.setCursor(0, 1);
@@ -150,7 +197,11 @@ void lcd_output(int minutes, int seconds)
 	if (temperature < 10)
 		lcd.print(" ");
 	lcd.print(temperature);
-	lcd.print("C ");
+	lcd.print("C");
+
+	// print average temperature last minute
+	lcd.print(" ");
+	lcd.print(temp_avg);
 }
 
 
@@ -159,11 +210,13 @@ void loop()
 	if (!acquire_dht11_sample())
 		return;
 
-	serial_output();
-
 	unsigned long runtime = millis();
 	unsigned long minutes = runtime / 60000;
 	unsigned long seconds = (runtime / 1000) % 60;
+
+	boolean updated = update_avg(minutes);
+
+	serial_output(updated);
 
 	lcd_output(minutes, seconds);
 
