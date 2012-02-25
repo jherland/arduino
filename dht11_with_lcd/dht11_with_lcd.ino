@@ -9,12 +9,16 @@
  */
 
 #include <LiquidCrystal.h>
+#include <EEPROM.h>
 
 // Initialize LCD library with the numbers of the interface pins
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
 // DHT11 signal pin is connected to this analog port
 const unsigned int DHT11_PIN = 0;
+
+// EEPROM size (1024 bytes on ATmega328)
+const unsigned int EEPROM_SIZE = 1024;
 
 // Current datagram from DHT11 (2B humidity, 2B temperature, 1B checksum)
 byte dht11_dat[5];
@@ -25,6 +29,7 @@ int temp_sum;
 int nsamples;
 float humd_avg;
 float temp_avg;
+unsigned int eeprom_addr;
 
 
 void setup()
@@ -37,6 +42,27 @@ void setup()
 	Serial.begin(9600);
 	Serial.println("Ready");
 
+	// Dump EEPROM to serial port
+	int i, j;
+	byte b = 0;
+	for (i = 0; i < EEPROM_SIZE; i += 0x10) {
+		Serial.print(i, HEX);
+		Serial.print(":");
+		for (j = 0; j < 0x10; j++) {
+			if (j % 2 == 0)
+				Serial.print(" ");
+			else
+				Serial.print("/");
+			b = EEPROM.read(i + j);
+			if (b == 0xff)
+				break;
+			Serial.print((float)b / 4.0);
+		}
+		Serial.println();
+		if (b == 0xff)
+			break;
+	}
+
 	// Set up 16x2 LCD panel
 	lcd.begin(16, 2);
 
@@ -46,6 +72,7 @@ void setup()
 	nsamples = 0;
 	humd_avg = 0;
 	temp_avg = 0;
+	eeprom_addr = 0;
 }
 
 
@@ -205,6 +232,16 @@ void lcd_output(int minutes, int seconds)
 }
 
 
+void log_to_eeprom()
+{
+	byte humd = humd_avg * 4;
+	byte temp = temp_avg * 4;
+	EEPROM.write(eeprom_addr++, humd);
+	EEPROM.write(eeprom_addr++, temp);
+	eeprom_addr %= EEPROM_SIZE;
+}
+
+
 void loop()
 {
 	if (!acquire_dht11_sample())
@@ -219,6 +256,9 @@ void loop()
 	serial_output(updated);
 
 	lcd_output(minutes, seconds);
+
+	if (updated)
+		log_to_eeprom();
 
 	// wait 2 seconds until next reading
 	delay(2000);
