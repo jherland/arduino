@@ -1,11 +1,12 @@
 /*
- * A combination of the DHT11 example code from http://www.dfrobot.com/wiki/index.php?title=DHT11_Temperature_and_Humidity_Sensor_(SKU:_DFR0067) (unknown license)
+ * Measure humidity and temperature with a DHT11 every 2 seconds,
+ * and output the readings on the serial port, and a 16x2 LCD panel.
+ * Also store per-minute averages to EEPROM and dump them on restart.
+ *
+ * Originally based on the DHT11 example code from http://www.dfrobot.com/wiki/index.php?title=DHT11_Temperature_and_Humidity_Sensor_(SKU:_DFR0067) (unknown license)
  * and the LCD 16x2 tutorial/example code from http://www.arduino.cc/en/Tutorial/LiquidCrystal (Public Domain)
  *
- * Measures humidity and temperature with the DHT11 every 2 seconds,
- * and outputs the readings on the serial port, and a 16x2 LCD panel.
- *
- * Compiled by Johan Herland <johan@herland.net>
+ * Johan Herland <johan@herland.net>
  */
 
 #include <LiquidCrystal.h>
@@ -42,7 +43,15 @@ void setup()
 	Serial.begin(9600);
 	Serial.println("Ready");
 
+	// Set up 16x2 LCD panel
+	lcd.begin(16, 2);
+
 	// Dump EEPROM to serial port
+	lcd.setCursor(0, 0);
+	lcd.print("Dumping EEPROM  ");
+	lcd.setCursor(0, 1);
+	lcd.print("to serial port..");
+	Serial.println("EEPROM dump start");
 	int i, j;
 	byte b = 0;
 	for (i = 0; i < EEPROM_SIZE; i += 0x10) {
@@ -59,12 +68,15 @@ void setup()
 			Serial.print((float)b / 4.0);
 		}
 		Serial.println();
+		lcd.setCursor(15, 1);
+		if (i % 0x80 >= 0x40)
+			lcd.print(".");
+		else
+			lcd.print(" ");
 		if (b == 0xff)
 			break;
 	}
-
-	// Set up 16x2 LCD panel
-	lcd.begin(16, 2);
+	Serial.println("EEPROM dump end");
 
 	cur_minute = millis() / 60000;
 	humd_sum = 0;
@@ -164,24 +176,24 @@ boolean update_avg(int minutes)
 }
 
 
-void serial_output(boolean updated)
+void serial_output(unsigned long runtime, boolean updated)
 {
 	// report humidity and temperature on serial port
-	Serial.print("Current humdity = ");
+	Serial.print("Current runtime/humidity/temperature: ");
+	Serial.print(runtime);
+	Serial.print(" ms, ");
 	Serial.print(dht11_dat[0], DEC);
 	Serial.print(".");
 	Serial.print(dht11_dat[1], DEC);
-	Serial.print("%  ");
-	Serial.print("temperature = ");
+	Serial.print(" %, ");
 	Serial.print(dht11_dat[2], DEC);
 	Serial.print(".");
 	Serial.print(dht11_dat[3], DEC);
-	Serial.println("C  ");
+	Serial.println(" C");
 	if (updated) {
-		Serial.print("Average humidity last minute: ");
+		Serial.print("Average humidity/temperature last minute: ");
 		Serial.print(humd_avg);
-		Serial.println("%");
-		Serial.print("Average temperature last minute: ");
+		Serial.print("%, ");
 		Serial.print(temp_avg);
 		Serial.println("C");
 	}
@@ -204,6 +216,7 @@ void lcd_output(int minutes, int seconds)
 	// print average humidity last minute
 	lcd.print(" ");
 	lcd.print(humd_avg);
+	lcd.print("   ");
 /*
 	// print runtime on lcd
 	if (minutes < 100) {
@@ -229,6 +242,7 @@ void lcd_output(int minutes, int seconds)
 	// print average temperature last minute
 	lcd.print(" ");
 	lcd.print(temp_avg);
+	lcd.print("   ");
 }
 
 
@@ -253,7 +267,7 @@ void loop()
 
 	boolean updated = update_avg(minutes);
 
-	serial_output(updated);
+	serial_output(runtime, updated);
 
 	lcd_output(minutes, seconds);
 
