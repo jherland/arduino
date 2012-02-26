@@ -1,6 +1,5 @@
 #!/usr/bin/env python2
 
-import sys
 from datetime import datetime
 import Gnuplot
 
@@ -102,4 +101,5 @@ def main(logfile):
 
 
 if __name__ == '__main__':
+	import sys
 	sys.exit(main(sys.argv[1]))
