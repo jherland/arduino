@@ -23,6 +23,7 @@ def collect_button(irpr):
 	button_name = raw_input("Please name this command: ").strip()
 	return (button_name, command)
 
+
 def main(args):
 	rc_name = raw_input("Enter a name for your remote control: ").strip()
 	outf = open(rc_name + ".commands", "a")
@@ -44,6 +45,7 @@ def main(args):
 	print "done. Here are the buttons you registered:"
 	for name, command in buttons:
 		print "%20s: %s" % (name, command)
+
 
 if __name__ == '__main__':
 	import sys

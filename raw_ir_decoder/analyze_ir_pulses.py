@@ -116,12 +116,25 @@ class IRCommand(object):
 
 		return cls(fp, bitstream, interval, len(bitstreams) + 1)
 
+	@classmethod
+	def from_string(cls, s):
+		s = s.strip()
+		assert s.startswith("<IRCommand: ")
+		assert s.endswith(">")
+		data, repeats = s[12:-1].split("x")
+		fp, bits, pause = data.strip().split("/")
+		fp = int(fp)
+		bits = map(int, list(bits))
+		pause = int(pause.strip())
+		repeats = int(repeats.strip())
+		return cls(fp, bits, pause, repeats)
+
 	def __init__(self, fp, bits, interval, repeats = 1):
 		self.fp = fp
 		self.bits = bits
 		self.interval = interval
 		self.repeats = repeats
-		assert self.bits[0] == 1 and self.bits[-1] == 1
+		assert self.bits[0] == 1 and self.bits[-1] == 1, self.bits
 
 	def __str__(self):
 		return "<IRCommand: %u/%s/%u x %u>" % (self.fp,
