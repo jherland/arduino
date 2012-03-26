@@ -37,7 +37,7 @@ def main(logfile):
 		elapsed = "%u days, " % (diff.days)
 	seconds = diff.seconds % 60
 	minutes = (diff.seconds // 60) % 60
-	hours = seconds / (60 * 60)
+	hours = diff.seconds / (60 * 60)
 	elapsed += "%02u:%02u:%02u" % (hours, minutes, seconds)
 
 	# Humidity
