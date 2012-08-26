@@ -3,7 +3,7 @@
  *
  * This program uses the Arduno and a three-pin IR receiver (like a
  * PNA4602 or IRM-3638N3 or similar part) to decode IR pulses (typically
- * transmitted by a remote control.
+ * transmitted by a remote control).
  *
  * Based on https://raw.github.com/adafruit/Raw-IR-decoder-for-Arduino/master/rawirdecode.pde
  *
