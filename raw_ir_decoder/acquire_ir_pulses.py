@@ -41,7 +41,7 @@ class IRPulseReader(object):
 
 
 def main(args):
-	irpr = IRPulseReader()
+	irpr = IRPulseReader(args[0])
 	timings = None
 	period = None
 	try:

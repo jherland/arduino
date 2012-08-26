@@ -29,7 +29,7 @@ def main(args):
 	outf = open(rc_name + ".commands", "a")
 	print "Ready to collect commands from '%s'" % (rc_name)
 
-	irpr = IRPulseReader()
+	irpr = IRPulseReader(args[0])
 	buttons = []
 
 	try:
