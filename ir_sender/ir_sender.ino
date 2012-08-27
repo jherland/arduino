@@ -10,7 +10,7 @@
 #define IR_LED_bit PORTB5
 const unsigned int IR_LED_pin = 13;
 
-const long timings[] = { // pulse lengths [usecs]
+const long timings[] = { // pulse lengths [µsecs]
 	2376, 594, 1188, 594, 594, 594, 1188, 594, 594, 594, 1188, 594,
 	594, 594, 594, 594, 1188, 594, 594, 594, 594, 594, 594, 594, 594,
 	25700,
@@ -28,17 +28,17 @@ void setup(void)
 }
 
 
-// Send 38KHz pulses to the IR_LED_pin for the given number of usecs
+// Send 38KHz pulses to the IR_LED_pin for the given number of µsecs
 void pulseIR(long usecs)
 {
 	while (usecs > 0) {
-		// 38 kHz is about 13 usecs high and 13 usecs low
+		// 38 kHz is about 13 µsecs high and 13 µsecs low
 		IR_LED_port |= _BV(IR_LED_bit);
 		delayMicroseconds(13);
 		IR_LED_port &= ~_BV(IR_LED_bit);
 		delayMicroseconds(12);
 
-		// so 26 usecs altogether
+		// so 26 µsecs altogether
 		usecs -= 26;
 	}
 }
