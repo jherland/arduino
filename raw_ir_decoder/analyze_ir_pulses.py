@@ -82,9 +82,27 @@ def find_fundamental_period(timings):
 		gstats.append((group[0], avg, group[-1]))
 		debug("\t\t%5u, %5.2f, %5u" % gstats[-1])
 
-	# Assume the fundamental period is the avg from the first group
+	# Start by assuming that fundamental period is avg from the first group
 	fp = int(round(gstats[0][1]))
-	debug("\tAttempting fundamental period == %u usec" % (fp))
+	debug("\t1st guess: fundamental period == %u usec" % (fp))
+	assert float(fp) / PulseGroupThreshold, "FP (%u) must be at least twice the grouping threshold (%u)" % (fp, PulseGroupThreshold)
+
+	# Use the first guess to find the appropriate integer multiple for each
+	# of the other groups.
+	multiples = []
+	for minp, avgp, maxp in gstats:
+		multiples.append(round(avgp / float(fp)))
+
+	# Now, re-calculate the FP by taking the average of _all_ samples
+	# (weighted by their integer multiple)
+	psum = 0
+	pnum = 0
+	assert len(groups) == len(multiples)
+	for group, mul in zip(groups, multiples):
+		psum += sum(group)
+		pnum += len(group) * mul
+	fp = int(round(psum / float(pnum)))
+	debug("\tAdjusted fundamental period == %u usec" % (fp))
 	assert float(fp) / PulseGroupThreshold, "FP (%u) must be at least twice the grouping threshold (%u)" % (fp, PulseGroupThreshold)
 
 	# Round averages to nearest integer multiple of fp, and verify
