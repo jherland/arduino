@@ -50,8 +50,6 @@ def main(args):
 			command = IRCommand.from_timings(timings)
 			print command
 			period = command.fp
-	except Exception as e:
-		print e
 	except KeyboardInterrupt:
 		pass
 
