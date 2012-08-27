@@ -54,8 +54,14 @@ void sendIRcode(void)
 	for (size_t i = 0; i < timings_len; i++) {
 		if (on)
 			pulseIR(timings[i]);
-		else
-			delayMicroseconds(timings[i]);
+		else {
+			size_t time_left = timings[i];
+			while (time_left > 10000) {
+				delayMicroseconds(10000);
+				time_left -= 10000;
+			}
+			delayMicroseconds(time_left);
+		}
 		on = !on;
 	}
 
