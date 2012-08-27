@@ -162,7 +162,14 @@ class IRCommand(object):
 		bitstreams, interval = binarify_signal(fp, timings)
 
 		bitstream = bitstreams.pop(0)
-		for bits in bitstreams:
+		for i, bits in enumerate(bitstreams):
+			# all bitstreams should match in principle, but allow
+			# for the last instance to be cut short.
+			if i == len(bitstreams) - 1 \
+			   and len(bits) < len(bitstream):
+				# Remove the last/short bitstream
+				bitstreams.pop()
+				break
 			assert bits == bitstream
 
 		return cls(fp, bitstream, interval, len(bitstreams) + 1)
