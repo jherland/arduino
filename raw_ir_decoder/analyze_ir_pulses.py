@@ -1,18 +1,50 @@
 #!/usr/bin/env python2
+# -*- coding: utf8 -*-
 
 from datetime import datetime
 import Gnuplot
 
-Debug = False
+Debug = True
 
-# Require that a pulse is within this much of an integer multiple of the
-# fundamental period.
-Tolerance = 0.2
+# What are the common characteristics of IR remote control signals?
+#  - A series of digital pulses of varying lengths.
+#  - Shortest pulses are between ~500 µsec and ~1000 µsec.
+#  - Pulse lengths are always (near) an integer multiple of the shortest pulse.
+#  - There are usually between ~30 and ~150 pulses in one "command".
+#  - Some commands are repeated (up to 4 times).
+#  - There is a relatively long delay (~15 - ~50 msec) between repetitions.
+#
+# As input, we get a list of timings, i.e. the (approximate) lengths of
+# subsequent high and low pulses (in µsecs) seen by the IR receiver.
+#
+# From this list of timings, we try to determine the shortest pulse length
+# (called the fundamental period - FP), and remodel all the other pulses as
+# integer multiples of the FP.
+#
+# Pulses that are longer than MaxPulseLength, are interpreted as inter-command
+# delays, and we expect the pulses following it to be a repetition of the
+# preceding pulses.
+#
+# If successful, the end result is a representation of the remote control
+# command, as a 4-tuple comprising:
+#  - The fundamental period of the command (in µsec)
+#  - The sequence of pulses in the command (as a string of '1's and '0's)
+#  - The delay between repetitions of this command (in µsec)
+#  - The number of repetitions of the command.
 
-# If a single pulse is longer than this many fundamental periods, we
-# assume that it is no longer a pulse, but rather a pause between two
-# pulses.
-MaxPulseLength = 20
+# Expect pulse lengths to be grouped around integer multiples of the FP.
+# We need some threshold to be used in the grouping. Since we expect the FP to
+# be > ~500 µsec, 200 µsec should be a fairly wide threshold while still
+# preventing us from putting neighboring multiples into the wrong group.
+# Note that we could have used a relative threshold here as well, but
+# experiments have shown that the variance in pulse lengths is fairly constant.
+# with the respect to the pulse length, so a fixed µsec threshold is likely to
+# yield better results
+PulseGroupThreshold = 200 # µsec
+
+# If a single pulse is longer than this, we assume that it is not a pulse, but
+# rather a pause/delay between two IR commands.
+MaxPulseLength = 15000 # µsec
 
 
 def debug(s):
@@ -23,11 +55,14 @@ def debug(s):
 def find_fundamental_period(timings):
 	debug("find_fundamental_period(%s):" % (timings))
 
-	# Group pulse periods that are within 2 x tolerance of eachother
+	# Group pulse periods that are within PulseGroupThreshold of eachother
 	groups = []
 	f = 0
 	for p in sorted(timings):
-		if p <= f * (1 + 2 * Tolerance):
+		if p > MaxPulseLength:
+			# stop when pulses are too long to be part of command
+			break
+		elif p <= f + PulseGroupThreshold:
 			# fits into current period group
 			groups[-1].append(p)
 		else:
@@ -50,20 +85,18 @@ def find_fundamental_period(timings):
 	# Assume the fundamental period is the avg from the first group
 	fp = int(round(gstats[0][1]))
 	debug("\tAttempting fundamental period == %u usec" % (fp))
+	assert float(fp) / PulseGroupThreshold, "FP (%u) must be at least twice the grouping threshold (%u)" % (fp, PulseGroupThreshold)
 
 	# Round averages to nearest integer multiple of fp, and verify
-	# that all readings are within 5% of that multiple
-	rstats = [] # gstats normalized to integer multiples of fp
+	# that all readings are within the PulseGroupThreshold
 	for minp, avgp, maxp in gstats:
 		ravg = round(avgp / float(fp))
-		assert minp >= (1 - Tolerance) * ravg * fp, "%u pulse is too low for %u in %s" % (minp, ravg, timings)
-		assert maxp <= (1 + Tolerance) * ravg * fp, "%u pulse is too high for %u in %s" % (maxp, ravg, timings)
-		rstats.append(ravg)
-		debug("\t\t%u (%f - %f)" % (
-			ravg, minp / (ravg * fp), maxp / (ravg * fp)))
+		debug("\t\t%2u (%4u <- %4u -> %4u)" % (ravg, minp, ravg * fp, maxp))
+		assert minp >= ravg * fp - PulseGroupThreshold, "%u pulse is too low for %u in %s" % (minp, ravg, timings)
+		assert maxp <= ravg * fp + PulseGroupThreshold, "%u pulse is too high for %u in %s" % (maxp, ravg, timings)
 
-	# If we haven't aborted yet, we have found a fundamental period
-	# of which all pulses are an integer multiple (within 5%).
+	# If we haven't aborted yet, we have found an FP where all pulses are
+	# an integer multiple of FP (within PulseGroupThreshold).
 	return fp
 
 
@@ -77,16 +110,16 @@ def binarify_signal(fp, timings):
 	interval = 0 # Shortest interval seen between bitstreams [usec]
 	for t in timings:
 		bit = (bit + 1) % 2
-		p = int(round(t / float(fp)));
-		if p > MaxPulseLength:
+		if t > MaxPulseLength:
 			# Start next bitstream
 			ret.append(bits)
 			bits = []
 			if interval == 0 or t < interval:
 				interval = t
 			continue
-		assert t >= (1 - Tolerance) * p * fp, timings
-		assert t <= (1 + Tolerance) * p * fp, timings
+		p = int(round(t / float(fp)));
+		assert t >= p * fp - PulseGroupThreshold, timings
+		assert t <= p * fp + PulseGroupThreshold, timings
 		for i in range(p):
 			bits.append(bit)
 	if bits:
