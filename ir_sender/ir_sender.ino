@@ -7,7 +7,7 @@
 
 // Where is the LED connected?
 #define IR_LED_port PORTB
-#define IR_LED_bit PB5
+#define IR_LED_bit PORTB5
 const unsigned int IR_LED_pin = 13;
 
 const long timings[] = { // pulse lengths [usecs]
