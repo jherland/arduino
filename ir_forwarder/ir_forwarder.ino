@@ -181,9 +181,39 @@ void loop(void)
 	if (rb_read == rb_write)
 		return; // Nothing has been added to the ring buffer
 
-	unsigned long sample = ring_buffer[rb_read] * 4l;
-	Serial.println(sample, DEC);
+	// Process the next pulse in the ring buffer
+	unsigned short start = ring_buffer[rb_read - 1];
+	unsigned short end = ring_buffer[rb_read];
+	unsigned long usecs = 0; // Calculate #usecs in this pulse
 
+	if (end) { // pulse has ended (i.e. end is not a overflow sentinel)
+		if (!start) { // an overflow occured during this pulse
+			// find the real start of the pulse in preceding slot
+			start == ring_buffer[rb_read - 2];
+			usecs += 65536l;
+			/*
+			 * If start is still == 0, we know that at least TWO
+			 * timer overflows occured during this pulse, meaning
+			 * that the pulse must be > ~262 msecs. That is not a
+			 * pulse, but rather a pause between IR commands.
+			 * Hence, we report the start of a new IR command
+			 * instead of an insane pulse length.
+			 */
+			if (!start) // ALSO an overflow sentinel
+				Serial.println("---"); // Between IR commands
+		}
+
+		if (start) {
+			// We have a definite start and end time. Calculate
+			// pulse length in usecs (using 4 usecs per timer
+			// count), and output to serial port.
+			usecs += end;
+			if (start > usecs) // Should not happen
+				Serial.println("***");
+			usecs -= start;
+			usecs *= 4;
+			Serial.println(usecs, DEC);
+		}
 	}
 
 	rb_read++;
