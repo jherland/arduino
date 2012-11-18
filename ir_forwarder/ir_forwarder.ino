@@ -200,7 +200,7 @@ void loop(void)
 			 * instead of an insane pulse length.
 			 */
 			if (!start) // ALSO an overflow sentinel
-				Serial.println("---"); // Between IR commands
+				Serial.println(F("---")); // Between IR commands
 		}
 
 		if (start) {
@@ -209,7 +209,7 @@ void loop(void)
 			// count), and output to serial port.
 			usecs += end;
 			if (start > usecs) // Should not happen
-				Serial.println("***");
+				Serial.println(F("***"));
 			usecs -= start;
 			usecs *= 4;
 			Serial.println(usecs, DEC);
