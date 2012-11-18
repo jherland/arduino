@@ -32,7 +32,7 @@
  * the serial port. The IR timings are recorded by the TIMER1_CAPT ISR into a
  * simple ring buffer. The main loop of the program then monitors this ring
  * buffer, and prints the recorded timings as ASCII decimal integers (unit is
- * usec) to the serial port (@115200 baud).
+ * usec) to the serial port (@ 115200 baud).
  *
  * Physical considerations:
  *
@@ -152,7 +152,7 @@ void setup(void)
 #define IR_toggle()  (TCCR2A ^= (_BV(COM2A1) | _BV(COM2A0)))
 
 // Timer1 Capture Event interrupt handler. Triggered on every incoming IR pulse
-// event, typically no more often than every ~500 usecs.
+// event, typically no more often than every ~100 usecs.
 ISR(TIMER1_CAPT_vect)
 {
 	// Read ICR1 register
