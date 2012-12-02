@@ -23,5 +23,5 @@ void loop() {
 	int value = analogRead(pot_pin); // 0 <= N < 1024
 	analogWrite(led_pin, value / 4); // 0 <= N < 255
 	Serial.println(value);
-	delay(100);
+	delay(50);
 }
