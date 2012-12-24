@@ -97,10 +97,9 @@ void setup()
 	// Enable PD2-3 internal pull-up resistors
 	PORTD |= _BV(PORTD2) | _BV(PORTD3);
 
-	// Set up INT0/1 interrupts to trigger on changing pin 2/3.
-	EICRA = B00000101; // - - - - ISC11 ISC10 ISC01 ISC00
-	EIMSK = B00000011; // - - - - - - INT1 INT0
-	EIFR  = B00000011; // - - - - - - INTF1 INTF0
+	// Set up PCINT18..20 interrupt to trigger on changing pins 2/3/4.
+	PCICR = B00000100; // - - - - - PCIE2 PCIE1 PCIE0
+	PCMSK2 = B00001100; // PCINT23 .. PCINT16
 
 	sei(); // Re-enable interrupts
 
@@ -108,40 +107,37 @@ void setup()
 }
 
 /*
- * INT0/1 interrupt vectors
+ * PCINT2 interrupt vector
  *
  * Append the current values of the relevant input pins to the ring buffer.
  */
-ISR(INT0_vect)
+ISR(PCINT2_vect)
 {
-  ring_buffer[rb_write++] = PIND;
+	ring_buffer[rb_write++] = PIND;
 }
-
-ISR(INT1_vect, ISR_ALIASOF(INT0_vect));
 
 void loop()
 {
 	if (rb_read == rb_write)
 		return; // Nothing has been added to the ring buffer
 
-	Serial.println((byte) rb_write - (byte) rb_read);
 	// Process the next value in the ring buffer
-	byte value = (ring_buffer[rb_read] >> 2) & 0b11;
+	byte value = (ring_buffer[rb_read] >> 2) & B11;
 	// Did the value actually change since last reading?
-	if (value != (pin_state & 0b11)) {
+	if (value != (pin_state & B11)) {
 		// Append to history of pin states
 		pin_state = (pin_state << 2) | value;
 		// Are we in a "rest" state?
-		if (value == 0b11) {
+		if (value == B11) {
 			// Figure out how we got here
-			switch (pin_state & 0b111111) {
-			case 0b000111:
+			switch (pin_state & B111111) {
+			case B000111:
 				// CCW
 				encoder_value--;
 				Serial.print("<- ");
 				Serial.println(encoder_value);
 				break;
-			case 0b001011:
+			case B001011:
 				// CW
 				encoder_value++;
 				Serial.print("-> ");
