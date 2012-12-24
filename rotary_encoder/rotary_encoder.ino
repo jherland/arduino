@@ -82,10 +82,12 @@ volatile byte ring_buffer[256] = { 0 };
 volatile byte rb_write; // current write position in ring buffer
 byte rb_read; // current read position in ringbuffer
 
-byte pin_state = 0;
-int encoder_value = 0;
+byte rot_state = 0;
+bool button_state = 0;
 
-void setup()
+int rot_value = 0;
+
+void setup(void)
 {
 	Serial.begin(115200);
 
@@ -99,7 +101,7 @@ void setup()
 
 	// Set up PCINT18..20 interrupt to trigger on changing pins 2/3/4.
 	PCICR = B00000100; // - - - - - PCIE2 PCIE1 PCIE0
-	PCMSK2 = B00001100; // PCINT23 .. PCINT16
+	PCMSK2 = B00011100; // PCINT23 .. PCINT16
 
 	sei(); // Re-enable interrupts
 
@@ -116,36 +118,74 @@ ISR(PCINT2_vect)
 	ring_buffer[rb_write++] = PIND;
 }
 
-void loop()
-{
-	if (rb_read == rb_write)
-		return; // Nothing has been added to the ring buffer
+enum input_events {
+	NO_EVENT        = 0,
+	ROT_CW          = 1, // Mutually exclusive with ROT_CCW.
+	ROT_CCW         = 2, // Mutually exclusive with ROT_CW.
+	BUTTON_PRESSED  = 4, // Mutually exclusive with BUTTON_RELEASED.
+	BUTTON_RELEASED = 8, // Mutually exclusive with BUTTON_PRESSED.
+};
 
-	// Process the next value in the ring buffer
-	byte value = (ring_buffer[rb_read] >> 2) & B11;
-	// Did the value actually change since last reading?
-	if (value != (pin_state & B11)) {
+/*
+ * Check the ring buffer and return a bitwise-OR combination of the above
+ * enum values.
+ */
+int process_inputs(void)
+{
+	int events = NO_EVENT;
+	if (rb_read == rb_write)
+		return NO_EVENT; // Nothing has been added to the ring buffer
+
+	// Process the next input event in the ring buffer
+	bool button_pin = ring_buffer[rb_read] & B10000;
+	byte rot_pins = (ring_buffer[rb_read] >> 2) & B11;
+
+	// Did the pushbutton change since last reading?
+	if (button_pin != button_state) {
+		// TODO: Debounce
+		events |= button_pin ? BUTTON_PRESSED : BUTTON_RELEASED;
+		button_state = button_pin;
+	}
+
+	// Did the rotary encoder value change since last reading?
+	if (rot_pins != (rot_state & B11)) {
 		// Append to history of pin states
-		pin_state = (pin_state << 2) | value;
+		rot_state = (rot_state << 2) | rot_pins;
 		// Are we in a "rest" state?
-		if (value == B11) {
+		if (rot_pins == B11) {
 			// Figure out how we got here
-			switch (pin_state & B111111) {
+			switch (rot_state & B111111) {
 			case B000111:
-				// CCW
-				encoder_value--;
-				Serial.print("<- ");
-				Serial.println(encoder_value);
+				events |= ROT_CCW;
 				break;
 			case B001011:
-				// CW
-				encoder_value++;
-				Serial.print("-> ");
-				Serial.println(encoder_value);
+				events |= ROT_CW;
 				break;
 			}
 		}
 	}
 
 	rb_read++;
+	return events;
+}
+
+void loop(void)
+{
+	int events = process_inputs();
+
+	if (events & BUTTON_PRESSED)
+		Serial.println(F("v"));
+	else if (events & BUTTON_RELEASED)
+		Serial.println(F("^"));
+
+	if (events & ROT_CW) {
+		rot_value++;
+		Serial.print(F("-> "));
+		Serial.println(rot_value);
+	}
+	else if (events & ROT_CCW) {
+		rot_value--;
+		Serial.print(F("<- "));
+		Serial.println(rot_value);
+	}
 }
