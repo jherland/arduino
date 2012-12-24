@@ -1,5 +1,6 @@
 /*
- * Driver for incremental rotary encoder w/support for pushbutton RGB LED.
+ * Driver for incremental rotary encoder w/built-in pushbutton and RGB LED.
+ *
  *
  * Objective:
  *
@@ -46,7 +47,8 @@
  *  - Encoder pin 3 to Arduino pin 4 with a 10K pull-down resistor
  *    (pushbutton input).
  *  - Encoder pins 4, 2 and 1 through current limiting resistors and on to
- *    Arduino pins 9, 10 and 11, respectively (PWM outputs for RGB LED).
+ *    Arduino pins 9, 10 and 11, respectively (PWM outputs for RGB LED
+ *    hooked up to PB1/OC1A, PB2/OC1B and PB3/OC2A, respectively).
  *
  * Diagram:
  *
@@ -65,14 +67,19 @@
  *    |  5|----------|Vcc  |
  *     ---            -----
  *
- * R1-R3: Current-limiting resistors, e.g. 330Ω
+ * R1-R3: Current-limiting resistors, e.g. 220Ω
  * R4: Pull-down resistor, e.g. 10KΩ
  *
+ *
+ * Mode of operation:
+ *
  * In the Arduino, the two rotary encoder inputs and the pusbutton input
- * trigger interrupts whose handler merely forwards the current state of
- * the inputs to the main loop by using a simple ring buffer. This keeps
- * the ISR very short and fast. The three PWM outputs are driven using
- * analogWrite() from the main loop.
+ * trigger a pin change interrupt (PCINT2). The corresponding ISR merely
+ * forwards the current state of the input pins to the main loop by using
+ * a simple ring buffer. This keeps the ISR very short and fast, and
+ * ensures that we miss as few interrupts as possible.
+ *
+ * The three PWM outputs are driven using analogWrite() from the main loop.
  *
  * Author: Johan Herland <johan@herland.net>
  * License: GNU GPL v2 or later
@@ -85,7 +92,8 @@ byte rb_read; // current read position in ringbuffer
 byte rot_state = 0;
 bool button_state = 0;
 
-int rot_value = 0;
+byte rot_value = 0;
+const byte rot_increment = 4;
 
 void setup(void)
 {
@@ -95,13 +103,16 @@ void setup(void)
 
 	// Set up input pins (Arduino pins 2/3/4 == PORTD pins 2/3/4).
 	// Set PD2-4 as inputs:
-	DDRD &= ~(_BV(DDD2) | _BV(DDD3) | _BV(DDD4));
+	DDRD &= ~B00011100;
 	// Enable PD2-3 internal pull-up resistors
-	PORTD |= _BV(PORTD2) | _BV(PORTD3);
+	PORTD |= B00001100;
 
 	// Set up PCINT18..20 interrupt to trigger on changing pins 2/3/4.
 	PCICR = B00000100; // - - - - - PCIE2 PCIE1 PCIE0
 	PCMSK2 = B00011100; // PCINT23 .. PCINT16
+
+	// Set up pins 9/10/11 (PB1..3) as output (for PWM)
+	DDRB |= B00001110;
 
 	sei(); // Re-enable interrupts
 
@@ -111,7 +122,7 @@ void setup(void)
 /*
  * PCINT2 interrupt vector
  *
- * Append the current values of the relevant input pins to the ring buffer.
+ * Append the current values of the relevant input port to the ring buffer.
  */
 ISR(PCINT2_vect)
 {
@@ -179,13 +190,20 @@ void loop(void)
 		Serial.println(F("^"));
 
 	if (events & ROT_CW) {
-		rot_value++;
+		rot_value += rot_increment;
 		Serial.print(F("-> "));
 		Serial.println(rot_value);
 	}
 	else if (events & ROT_CCW) {
-		rot_value--;
+		rot_value -= rot_increment;
 		Serial.print(F("<- "));
 		Serial.println(rot_value);
 	}
+
+	// TODO: New CL resistors
+	// TODO: R/G/B modes
+	// TODO: acceleration in rotation
+	analogWrite( 9, 0xff - rot_value);
+	analogWrite(10, 0xff - rot_value);
+	analogWrite(11, 0xff - rot_value);
 }
