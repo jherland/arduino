@@ -94,7 +94,6 @@ bool button_state = 0;
 
 byte rot_values[3] = { 0 }; // R/G/B mode values
 byte mode = 0; // Index into above array
-const int rot_increment = 4;
 
 void setup(void)
 {
@@ -249,12 +248,13 @@ void loop(void)
 		print_state('^');
 	}
 
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 	if (events & ROT_CW) {
-		update_value(rot_increment);
+		update_value(MAX(1, rot_values[mode] / 2));
 		print_state('>');
 	}
 	else if (events & ROT_CCW) {
-		update_value(-rot_increment);
+		update_value(-MAX(1, rot_values[mode] / 3));
 		print_state('<');
 	}
 
