@@ -149,15 +149,11 @@ ISR(TIMER2_OVF_vect)
 {
 	TIMSK2 &= ~1; // Unset TOIE2 to disable Timer2 overflow interrupt
 	ring_buffer[rb_write++] = (PIND & B00011100) | B00100000;
-	Serial.print("@ ");
-	Serial.println(micros());
 }
 
 void start_debounce_timer(void)
 {
 	// Reset Counter2 value, and enable overflow interrupt
-	Serial.print("! ");
-	Serial.println(micros());
 	TCNT2 = 0; // Reset Counter2
 	TIFR2 |= 1; // Write 1 to TOV2 to clear Timer2 overflow flag
 	TIMSK2 |= 1; // Set TOIE2 to enable Timer2 overflow interrupt
