@@ -119,6 +119,17 @@ void setup(void)
 	analogWrite(10, 0xff);
 	analogWrite(11, 0xff);
 
+	/*
+	 * In addition to the above, we will use the Timer/Counter2
+	 * overflow interrupt as a crude debouncing timer for the
+	 * pushbutton: When a pushbutton event happens, we'll reset the
+	 * Counter2 value to 0, and enable the overflow interrupt. If more
+	 * pushbutton events happen, we'll reset the counter. When the
+	 * overflow interrupt finally happens (after ~2.4ms, a side effect
+	 * of how analogWrite() sets up the PWM-ing), we'll disable the
+	 * interrupt, and do a "proper" reading of the pushbutton state.
+	 */
+
 	sei(); // Re-enable interrupts
 
 	Serial.println(F("Ready"));
@@ -131,15 +142,33 @@ void setup(void)
  */
 ISR(PCINT2_vect)
 {
-	ring_buffer[rb_write++] = PIND;
+	ring_buffer[rb_write++] = PIND & B00011100;
+}
+
+ISR(TIMER2_OVF_vect)
+{
+	TIMSK2 &= ~1; // Unset TOIE2 to disable Timer2 overflow interrupt
+	ring_buffer[rb_write++] = (PIND & B00011100) | B00100000;
+	Serial.print("@ ");
+	Serial.println(micros());
+}
+
+void start_debounce_timer(void)
+{
+	// Reset Counter2 value, and enable overflow interrupt
+	Serial.print("! ");
+	Serial.println(micros());
+	TCNT2 = 0; // Reset Counter2
+	TIFR2 |= 1; // Write 1 to TOV2 to clear Timer2 overflow flag
+	TIMSK2 |= 1; // Set TOIE2 to enable Timer2 overflow interrupt
 }
 
 enum input_events {
-	NO_EVENT        = 0,
-	ROT_CW          = 1, // Mutually exclusive with ROT_CCW.
-	ROT_CCW         = 2, // Mutually exclusive with ROT_CW.
-	BUTTON_PRESSED  = 4, // Mutually exclusive with BUTTON_RELEASED.
-	BUTTON_RELEASED = 8, // Mutually exclusive with BUTTON_PRESSED.
+	NO_EVENT = 0,
+	ROT_CW   = 1, // Mutually exclusive with ROT_CCW.
+	ROT_CCW  = 2, // Mutually exclusive with ROT_CW.
+	BTN_DOWN = 4, // Mutually exclusive with BTN_UP.
+	BTN_UP   = 8, // Mutually exclusive with BTN_DOWN.
 };
 
 /*
@@ -153,17 +182,21 @@ int process_inputs(void)
 		return NO_EVENT; // Nothing has been added to the ring buffer
 
 	// Process the next input event in the ring buffer
-	bool button_pin = ring_buffer[rb_read] & B10000;
-	byte rot_pins = (ring_buffer[rb_read] >> 2) & B11;
 
 	// Did the pushbutton change since last reading?
+	bool debounced = ring_buffer[rb_read] & B100000;
+	bool button_pin = ring_buffer[rb_read] & B10000;
 	if (button_pin != button_state) {
-		// TODO: Debounce
-		events |= button_pin ? BUTTON_PRESSED : BUTTON_RELEASED;
-		button_state = button_pin;
+		if (!debounced)
+			start_debounce_timer();
+		else {
+			events |= button_pin ? BTN_DOWN : BTN_UP;
+			button_state = button_pin;
+		}
 	}
 
 	// Did the rotary encoder value change since last reading?
+	byte rot_pins = (ring_buffer[rb_read] >> 2) & B11;
 	if (rot_pins != (rot_state & B11)) {
 		// Append to history of pin states
 		rot_state = (rot_state << 2) | rot_pins;
@@ -213,9 +246,9 @@ void loop(void)
 {
 	int events = process_inputs();
 
-	if (events & BUTTON_PRESSED)
+	if (events & BTN_DOWN)
 		print_state('v');
-	else if (events & BUTTON_RELEASED) {
+	else if (events & BTN_UP) {
 		next_mode();
 		print_state('^');
 	}
@@ -229,8 +262,6 @@ void loop(void)
 		print_state('<');
 	}
 
-	// TODO: pushbutton debounce
-	// TODO: New CL resistors
 	// TODO: acceleration in rotation
 	// TODO: Low power mode
 }
