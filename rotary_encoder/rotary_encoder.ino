@@ -92,8 +92,9 @@ byte rb_read; // current read position in ringbuffer
 byte rot_state = 0;
 bool button_state = 0;
 
-byte rot_value = 0;
-const byte rot_increment = 4;
+byte rot_values[3] = { 0 }; // R/G/B mode values
+byte mode = 0; // Index into above array
+const int rot_increment = 4;
 
 void setup(void)
 {
@@ -113,6 +114,10 @@ void setup(void)
 
 	// Set up pins 9/10/11 (PB1..3) as output (for PWM)
 	DDRB |= B00001110;
+	// Initialize RGB LED to all black
+	analogWrite( 9, 0xff);
+	analogWrite(10, 0xff);
+	analogWrite(11, 0xff);
 
 	sei(); // Re-enable interrupts
 
@@ -180,30 +185,52 @@ int process_inputs(void)
 	return events;
 }
 
+void next_mode()
+{
+	analogWrite(9 + mode, 0xff);
+	++mode %= sizeof rot_values;
+	analogWrite(9 + mode, 0xff - rot_values[mode]);
+}
+
+void update_value(int increment)
+{
+#define LIMIT(min, val, max) (min > val ? min : (max < val) ? max : val)
+	int result = LIMIT(0x00, rot_values[mode] + increment, 0xff);
+	rot_values[mode] = result;
+	analogWrite(9 + mode, 0xff - result);
+}
+
+void print_state(char event)
+{
+	Serial.print(event);
+	Serial.print(F(" "));
+	Serial.print(mode);
+	Serial.print(F(":"));
+	Serial.println(rot_values[mode]);
+}
+
 void loop(void)
 {
 	int events = process_inputs();
 
 	if (events & BUTTON_PRESSED)
-		Serial.println(F("v"));
-	else if (events & BUTTON_RELEASED)
-		Serial.println(F("^"));
+		print_state('v');
+	else if (events & BUTTON_RELEASED) {
+		next_mode();
+		print_state('^');
+	}
 
 	if (events & ROT_CW) {
-		rot_value += rot_increment;
-		Serial.print(F("-> "));
-		Serial.println(rot_value);
+		update_value(rot_increment);
+		print_state('>');
 	}
 	else if (events & ROT_CCW) {
-		rot_value -= rot_increment;
-		Serial.print(F("<- "));
-		Serial.println(rot_value);
+		update_value(-rot_increment);
+		print_state('<');
 	}
 
+	// TODO: pushbutton debounce
 	// TODO: New CL resistors
-	// TODO: R/G/B modes
 	// TODO: acceleration in rotation
-	analogWrite( 9, 0xff - rot_value);
-	analogWrite(10, 0xff - rot_value);
-	analogWrite(11, 0xff - rot_value);
+	// TODO: Low power mode
 }
