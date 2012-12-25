@@ -81,6 +81,11 @@
  *
  * The three PWM outputs are driven using analogWrite() from the main loop.
  *
+ * The main loop implements a 3-channel LED controller, where the
+ * pushbutton is used to cycle to Red/Green/Blue modes, and rotation is
+ * used to adjust the level in each mode. The RGB LED displays the light
+ * value of currently selected mode.
+ *
  * Author: Johan Herland <johan@herland.net>
  * License: GNU GPL v2 or later
  */
@@ -260,4 +265,5 @@ void loop(void)
 
 	// TODO: acceleration in rotation
 	// TODO: Low power mode
+	// TODO: RFM12B communication
 }
