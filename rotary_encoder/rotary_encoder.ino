@@ -161,7 +161,6 @@ void start_debounce_timer(void)
 {
 	// Reset Counter1 value, and enable overflow interrupt
 	TCNT1 = 0; // Reset Counter1
-	TIFR1 |= 1; // Write 1 to TOV1 to clear Timer1 overflow flag
 	TIMSK1 |= 1; // Set TOIE1 to enable Timer1 overflow interrupt
 }
 
