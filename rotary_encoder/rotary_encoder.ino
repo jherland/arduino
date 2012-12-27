@@ -40,30 +40,30 @@
  *  5: Common anode for LEDs, and pushbutton switch
  *
  * Arduino hookup:
- *  - Encoder pin C to Arduino GND.
- *  - Encoder pins A and B to Arduino pins 2 and 3 (rotation code inputs;
- *    flip them to swap CW vs. CCW rotation).
- *  - Encoder pin 5 to Arduino Vcc (5V or 3.3V).
- *  - Encoder pin 3 to Arduino pin 4 with a 10K pull-down resistor
+ *  - Encoder pin C to GND.
+ *  - Encoder pins A and B to PC0..1 (Arduino pins A0 and A1)
+ *    (rotation code inputs; flip them to swap CW vs. CCW rotation).
+ *  - Encoder pin 5 to Vcc (5V or 3.3V).
+ *  - Encoder pin 3 to PC2 (Arduino pin A2) with a 10K pull-down resistor
  *    (pushbutton input).
  *  - Encoder pins 4, 2 and 1 through current limiting resistors and on to
- *    Arduino pins 9, 10 and 11, respectively (PWM outputs for RGB LED
- *    hooked up to PB1/OC1A, PB2/OC1B and PB3/OC2A, respectively).
+ *    D5, D6 and B1 (Arduino pins 5, 6 and 9), respectively (PWM outputs
+ *    for RGB LED hooked up to D5/OC0B, D6/OC0A and B1/OC1A, respectively).
  *
  * Diagram:
  *
  *   Encoder         Arduino
  *     ---            -----
- *    |  A|----------|2    |
+ *    |  A|----------|A0   |
  *    |  C|------*---|GND  |
- *    |  B|------+---|3    |
+ *    |  B|------+---|A1   |
  *    |   |      |   |     |
  *    |   |      R4  |     |
  *    |   |      |   |     |
- *    |  1|--R3--+---|11   |
- *    |  2|--R2--+---|10   |
- *    |  3|------*---|4    |
- *    |  4|--R1------|9    |
+ *    |  1|--R3--+---|9    |
+ *    |  2|--R2--+---|6    |
+ *    |  3|------*---|A2   |
+ *    |  4|--R1------|5    |
  *    |  5|----------|Vcc  |
  *     ---            -----
  *
@@ -74,7 +74,7 @@
  * Mode of operation:
  *
  * In the Arduino, the two rotary encoder inputs and the pusbutton input
- * trigger a pin change interrupt (PCINT2). The corresponding ISR merely
+ * trigger a pin change interrupt (PCINT1). The corresponding ISR merely
  * forwards the current state of the input pins to the main loop by using
  * a simple ring buffer. This keeps the ISR very short and fast, and
  * ensures that we miss as few interrupts as possible.
@@ -100,34 +100,36 @@ bool button_state = 0;
 byte rot_values[3] = { 0 }; // R/G/B mode values
 byte mode = 0; // Index into above array
 
+const byte pwm_pins[3] = {5, 6, 9};
+
 void setup(void)
 {
 	Serial.begin(115200);
 
 	cli(); // Disable interrupts while setting up
 
-	// Set up input pins (Arduino pins 2/3/4 == PORTD pins 2/3/4).
-	// Set PD2-4 as inputs:
-	DDRD &= ~B00011100;
-	// Enable PD2-3 internal pull-up resistors
-	PORTD |= B00001100;
+	// Set up input pins (Arduino pins A0..A2 == PORTC pins 0..2).
+	// Set PC0..2 as inputs:
+	DDRC &= ~B00000111;
+	// Enable PC0..1 internal pull-up resistors
+	PORTC |= B00000011;
 
-	// Set up PCINT18..20 interrupt to trigger on changing pins 2/3/4.
-	PCICR = B00000100; // - - - - - PCIE2 PCIE1 PCIE0
-	PCMSK2 = B00011100; // PCINT23 .. PCINT16
+	// Set up PCINT8..10 interrupt to trigger on changing pins A0..A2.
+	PCICR = B00000010; // - - - - - PCIE2 PCIE1 PCIE0
+	PCMSK1 = B00000111; // - PCINT14 .. PCINT8
 
-	// Set up pins 9/10/11 (PB1..3) as output (for PWM)
-	DDRB |= B00001110;
+	// Set up pins 5/6/9 (D5/D6/B1) as output (for PWM)
+	DDRD |= B01100000;
+	DDRB |= B00000010;
 	// Initialize RGB LED to all black
-	analogWrite( 9, 0xff);
-	analogWrite(10, 0xff);
-	analogWrite(11, 0xff);
+	for (int i = 0; i < sizeof pwm_pins; i++)
+		analogWrite(pwm_pins[i], 0xff);
 
 	/*
-	 * In addition to the above, we will use the Timer/Counter2
+	 * In addition to the above, we will use the Timer/Counter1
 	 * overflow interrupt as a crude debouncing timer for the
 	 * pushbutton: When a pushbutton event happens, we'll reset the
-	 * Counter2 value to 0, and enable the overflow interrupt. If more
+	 * Counter1 value to 0, and enable the overflow interrupt. If more
 	 * pushbutton events happen, we'll reset the counter. When the
 	 * overflow interrupt finally happens (after ~2.4ms, a side effect
 	 * of how analogWrite() sets up the PWM-ing), we'll disable the
@@ -140,27 +142,27 @@ void setup(void)
 }
 
 /*
- * PCINT2 interrupt vector
+ * PCINT1 interrupt vector
  *
  * Append the current values of the relevant input port to the ring buffer.
  */
-ISR(PCINT2_vect)
+ISR(PCINT1_vect)
 {
-	ring_buffer[rb_write++] = PIND & B00011100;
+	ring_buffer[rb_write++] = PINC & B00000111;
 }
 
-ISR(TIMER2_OVF_vect)
+ISR(TIMER1_OVF_vect)
 {
-	TIMSK2 &= ~1; // Unset TOIE2 to disable Timer2 overflow interrupt
-	ring_buffer[rb_write++] = (PIND & B00011100) | B00100000;
+	TIMSK1 &= ~1; // Unset TOIE1 to disable Timer1 overflow interrupt
+	ring_buffer[rb_write++] = (PINC & B00000111) | B00001000;
 }
 
 void start_debounce_timer(void)
 {
-	// Reset Counter2 value, and enable overflow interrupt
-	TCNT2 = 0; // Reset Counter2
-	TIFR2 |= 1; // Write 1 to TOV2 to clear Timer2 overflow flag
-	TIMSK2 |= 1; // Set TOIE2 to enable Timer2 overflow interrupt
+	// Reset Counter1 value, and enable overflow interrupt
+	TCNT1 = 0; // Reset Counter1
+	TIFR1 |= 1; // Write 1 to TOV1 to clear Timer1 overflow flag
+	TIMSK1 |= 1; // Set TOIE1 to enable Timer1 overflow interrupt
 }
 
 enum input_events {
@@ -184,8 +186,8 @@ int process_inputs(void)
 	// Process the next input event in the ring buffer
 
 	// Did the pushbutton change since last reading?
-	bool debounced = ring_buffer[rb_read] & B100000;
-	bool button_pin = ring_buffer[rb_read] & B10000;
+	bool debounced = ring_buffer[rb_read] & B1000;
+	bool button_pin = ring_buffer[rb_read] & B0100;
 	if (button_pin != button_state) {
 		if (!debounced)
 			start_debounce_timer();
@@ -196,7 +198,7 @@ int process_inputs(void)
 	}
 
 	// Did the rotary encoder value change since last reading?
-	byte rot_pins = (ring_buffer[rb_read] >> 2) & B11;
+	byte rot_pins = ring_buffer[rb_read] & B11;
 	if (rot_pins != (rot_state & B11)) {
 		// Append to history of pin states
 		rot_state = (rot_state << 2) | rot_pins;
@@ -220,9 +222,9 @@ int process_inputs(void)
 
 void next_mode()
 {
-	analogWrite(9 + mode, 0xff);
+	analogWrite(pwm_pins[mode], 0xff);
 	++mode %= sizeof rot_values;
-	analogWrite(9 + mode, 0xff - rot_values[mode]);
+	analogWrite(pwm_pins[mode], 0xff - rot_values[mode]);
 }
 
 void update_value(int increment)
@@ -230,7 +232,7 @@ void update_value(int increment)
 #define LIMIT(min, val, max) (min > val ? min : (max < val) ? max : val)
 	int result = LIMIT(0x00, rot_values[mode] + increment, 0xff);
 	rot_values[mode] = result;
-	analogWrite(9 + mode, 0xff - result);
+	analogWrite(pwm_pins[mode], 0xff - result);
 }
 
 void print_state(char event)
@@ -263,7 +265,7 @@ void loop(void)
 		print_state('<');
 	}
 
-	// TODO: acceleration in rotation
-	// TODO: Low power mode
 	// TODO: RFM12B communication
+	// TODO: Low power mode
+	// TODO: Run on JeeNode Micro v2?
 }
