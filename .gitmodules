@@ -1,0 +1,3 @@
+[submodule "jeelib"]
+	path = libraries/JeeLib
+	url = git://github.com/jcw/jeelib.git
