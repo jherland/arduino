@@ -33,10 +33,10 @@
  *  A: Rotary encoder bit A
  *  B: Rotary encoder bit B
  *  C: Ground (connected to A & B during rotation)
- *  1: Blue LED cathode
+ *  1: Red LED cathode
  *  2: Green LED cathode
  *  3: Pushbutton switch
- *  4: Red LED cathode
+ *  4: Blue LED cathode
  *  5: Common anode for LEDs, and pushbutton switch
  *
  * Arduino hookup:
@@ -46,7 +46,7 @@
  *  - Encoder pin 5 to Vcc (5V or 3.3V).
  *  - Encoder pin 3 to PC2 (Arduino pin A2) with a 10K pull-down resistor
  *    (pushbutton input).
- *  - Encoder pins 4, 2 and 1 through current limiting resistors and on to
+ *  - Encoder pins 1, 2 and 4 through current limiting resistors and on to
  *    D5, D6 and B1 (Arduino pins 5, 6 and 9), respectively (PWM outputs
  *    for RGB LED hooked up to D5/OC0B, D6/OC0A and B1/OC1A, respectively).
  *
@@ -60,10 +60,10 @@
  *    |   |      |   |     |
  *    |   |      R4  |     |
  *    |   |      |   |     |
- *    |  1|--R3--+---|9    |
+ *    |  1|--R3--+---|5    |
  *    |  2|--R2--+---|6    |
  *    |  3|------*---|A2   |
- *    |  4|--R1------|5    |
+ *    |  4|--R1------|9    |
  *    |  5|----------|Vcc  |
  *     ---            -----
  *
@@ -82,13 +82,22 @@
  * The three PWM outputs are driven using analogWrite() from the main loop.
  *
  * The main loop implements a 3-channel LED controller, where the
- * pushbutton is used to cycle to Red/Green/Blue modes, and rotation is
- * used to adjust the level in each mode. The RGB LED displays the light
- * value of currently selected mode.
+ * pushbutton is used to cycle through the Red/Green/Blue channels, and
+ * rotation adjusts the level/value of the current channel. The RGB LED
+ * displays the color of the current channel, with intensity proportional
+ * to the level/value of the current channel.
  *
  * Author: Johan Herland <johan@herland.net>
  * License: GNU GPL v2 or later
  */
+
+// Utility macros
+#define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define LIMIT(min, val, max) (min > val ? min : (max < val) ? max : val)
+
+const byte VERSION = 1;
 
 volatile byte ring_buffer[256] = { 0 };
 volatile byte rb_write; // current write position in ring buffer
@@ -97,8 +106,8 @@ byte rb_read; // current read position in ringbuffer
 byte rot_state = 0;
 bool button_state = 0;
 
-byte rot_values[3] = { 0 }; // R/G/B mode values
-byte mode = 0; // Index into above array
+byte rot_values[3] = { 0 }; // R/G/B channel values
+byte cur_channel = 0; // Index into above array
 
 const byte pwm_pins[3] = {5, 6, 9};
 
@@ -122,7 +131,7 @@ void setup(void)
 	DDRD |= B01100000;
 	DDRB |= B00000010;
 	// Initialize RGB LED to all black
-	for (int i = 0; i < sizeof pwm_pins; i++)
+	for (int i = 0; i < ARRAY_LENGTH(pwm_pins); i++)
 		analogWrite(pwm_pins[i], 0xff);
 
 	/*
@@ -138,6 +147,8 @@ void setup(void)
 
 	sei(); // Re-enable interrupts
 
+	Serial.print(F("Rotary Encoder version "));
+	Serial.println(VERSION);
 	Serial.println(F("Ready"));
 }
 
@@ -219,28 +230,32 @@ int process_inputs(void)
 	return events;
 }
 
-void next_mode()
+void next_channel()
 {
-	analogWrite(pwm_pins[mode], 0xff);
-	++mode %= sizeof rot_values;
-	analogWrite(pwm_pins[mode], 0xff - rot_values[mode]);
+	// Stop displaying current channel
+	analogWrite(pwm_pins[cur_channel], 0xff);
+	// Go to next channel
+	++cur_channel %= ARRAY_LENGTH(rot_values);
+	// Display level of the new channel
+	analogWrite(pwm_pins[cur_channel], 0xff - rot_values[cur_channel]);
 }
 
 void update_value(int increment)
 {
-#define LIMIT(min, val, max) (min > val ? min : (max < val) ? max : val)
-	int result = LIMIT(0x00, rot_values[mode] + increment, 0xff);
-	rot_values[mode] = result;
-	analogWrite(pwm_pins[mode], 0xff - result);
+	// Adjust current channel, but limit to 0 <= level <= 255
+	int level = LIMIT(0x00, rot_values[cur_channel] + increment, 0xff);
+	rot_values[cur_channel] = level;
+	// Display adjusted level
+	analogWrite(pwm_pins[cur_channel], 0xff - level);
 }
 
 void print_state(char event)
 {
 	Serial.print(event);
 	Serial.print(F(" "));
-	Serial.print(mode);
+	Serial.print(cur_channel);
 	Serial.print(F(":"));
-	Serial.println(rot_values[mode]);
+	Serial.println(rot_values[cur_channel]);
 }
 
 void loop(void)
@@ -250,17 +265,16 @@ void loop(void)
 	if (events & BTN_DOWN)
 		print_state('v');
 	else if (events & BTN_UP) {
-		next_mode();
+		next_channel();
 		print_state('^');
 	}
 
-#define MAX(x, y) ((x) > (y) ? (x) : (y))
 	if (events & ROT_CW) {
-		update_value(MAX(1, rot_values[mode] / 2));
+		update_value(MAX(1, rot_values[cur_channel] / 2));
 		print_state('>');
 	}
 	else if (events & ROT_CCW) {
-		update_value(-MAX(1, rot_values[mode] / 3));
+		update_value(-MAX(1, rot_values[cur_channel] / 3));
 		print_state('<');
 	}
 
