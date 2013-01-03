@@ -91,13 +91,20 @@
  * License: GNU GPL v2 or later
  */
 
+#include <RF12.h>
+
 // Utility macros
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define LIMIT(min, val, max) (min > val ? min : (max < val) ? max : val)
 
-const byte VERSION = 1;
+const byte VERSION = 2;
+
+const byte rfm12b_band = RF12_868MHZ;
+const byte rfm12b_group = 123;
+const byte rfm12b_local_id = 13;
+const byte rfm12b_remote_id = 0;
 
 volatile byte ring_buffer[256] = { 0 };
 volatile byte rb_write; // current write position in ring buffer
@@ -110,6 +117,70 @@ byte rot_values[3] = { 0 }; // R/G/B channel values
 byte cur_channel = 0; // Index into above array
 
 const byte pwm_pins[3] = {5, 6, 9};
+
+// Format of rfm12b data packets used to send commands and status updates:
+struct rc_data {
+	uint8_t modify   : 1; // Modify (=1) or Read (=0) command.
+	uint8_t relative : 1; // Next byte is relative (=1) or absolute (=0).
+	uint8_t channel  : 6; // Channel number to be written/read
+	union {
+		uint8_t abs_value;
+		int8_t rel_value;
+	};
+};
+
+struct rc_packet {
+	uint8_t hdr; // RF12 packet header
+	struct rc_data d; // RF12 packet payload
+};
+
+/*
+ * RFM12B network protocol between this rotary remote control (RRC) and
+ * the remote nodes that "channels" and "levels":
+ *
+ * The objective of this network protocol is to allow an RRC to read and
+ * modify the current level of a channel on a remote node. The RRC knows
+ * the remote node ID and channel number beforehand, but must be able to
+ * the request the current channel level, and also request a modification
+ * of the channel level across the network. Furthermore, the channel level
+ * may be manipulated by other means (either from other RRCs, or via some
+ * other mechanism), so the RRC needs to receive updates of the current
+ * channel level. The channel and its associated level is "owned" by the
+ * remote node, but the RRC needs to know it in order to display useful
+ * feedback to its user.
+ *
+ * More specifically, the RFM12B messages needed are:
+ *
+ * - Status request: From RRC to remote node to request current level of
+ *   a given channel. Packet data: {0, 0, $channel, 0}
+ * - Status update: Broadcast from remote node, to inform of current level
+ *   of a given channel. Packet data: {0, 0, $channel, $abs_value}
+ * - Change request: From RRC to remote node to request a change in the
+ *   level of a given channel. Packet data: {1, 1, $channel, $rel_value}
+ *                             OR           {1, 0, $channel, $abs_value}
+ *
+ * The network traffic proceeds as follows:
+ *
+ * - When switching to a (different) channel, the RRC typically sends a
+ *   status request to the remote node, to establish the current level for
+ *   that channel.
+ *
+ * - Upon receiving a status request, the remote node _broadcasts_ a
+ *   status update containing the current level of that channel.
+ *
+ * - When rotation occurs, the RRC sends a change request to the remote
+ *   node, which should adjust its channel accordingly.
+ *
+ * - Whenever the remote node adjusts a channel, the new level of that
+ *   channel should be _broadcast_ as a status update.
+ *
+ * Fundamentally, the RRC is free to send status requests at any time, and
+ * the remote node is free to broadcast status updates at any time.
+ */
+
+struct rc_packet out_buf[16]; // RFM12B packet output buffer
+byte ob_write; // current write position in out_buf ringbuffer
+byte ob_read; // current read position in out_buf ringbuffer
 
 void setup(void)
 {
@@ -147,8 +218,23 @@ void setup(void)
 
 	sei(); // Re-enable interrupts
 
+	// Set up RFM12B communication
+	rf12_initialize(rfm12b_local_id, rfm12b_band, rfm12b_group);
+
+	status_request(next_packet(), cur_channel);
+
 	Serial.print(F("Rotary Encoder version "));
 	Serial.println(VERSION);
+	Serial.print(F("Using RFM12B group "));
+	Serial.print(rfm12b_group);
+	Serial.print(F(" from node "));
+	Serial.print(rfm12b_local_id);
+	Serial.print(F(" to node "));
+	Serial.print(rfm12b_remote_id);
+	Serial.print(F(" @ "));
+	Serial.print(rfm12b_band == RF12_868MHZ ? 868
+		  : (rfm12b_band == RF12_433MHZ ? 433 : 915));
+	Serial.println(F("MHz"));
 	Serial.println(F("Ready"));
 }
 
@@ -238,6 +324,8 @@ void next_channel()
 	++cur_channel %= ARRAY_LENGTH(rot_values);
 	// Display level of the new channel
 	analogWrite(pwm_pins[cur_channel], 0xff - rot_values[cur_channel]);
+	// Ask for a status update on the current channel
+	status_request(next_packet(), cur_channel);
 }
 
 void update_value(int increment)
@@ -247,6 +335,8 @@ void update_value(int increment)
 	rot_values[cur_channel] = level;
 	// Display adjusted level
 	analogWrite(pwm_pins[cur_channel], 0xff - level);
+	// Ask for remote end to update its status
+	adjust_request(next_packet(), cur_channel, increment);
 }
 
 void print_state(char event)
@@ -258,8 +348,96 @@ void print_state(char event)
 	Serial.println(rot_values[cur_channel]);
 }
 
+void print_byte_buf(volatile byte * buf, size_t len)
+{
+	for (size_t i = 0; i < len; i++) {
+		Serial.print(F(" "));
+		if (buf[i] <= 0xf)
+			Serial.print(F("0"));
+		Serial.print(buf[i], HEX);
+	}
+	Serial.println();
+}
+
+bool recv_update(void)
+{
+	if (rf12_recvDone()) {
+		Serial.println(F("Received RFM12B communication:"));
+		if (rf12_crc)
+			Serial.println(F("  CRC mismatch. Discarding!"));
+		else {
+			Serial.print(F("  rf12_hdr: 0x"));
+			Serial.println(rf12_hdr, HEX);
+			Serial.print(F("  rf12_len: "));
+			Serial.println(rf12_len);
+			Serial.print(F("  rf12_data(hex):"));
+			print_byte_buf(rf12_data, rf12_len);
+			return true;
+		}
+	}
+	return false;
+}
+
+struct rc_packet * next_packet(void)
+{
+	byte i = ob_write;
+	++ob_write %= ARRAY_LENGTH(out_buf);
+	return out_buf + i;
+}
+
+void status_request(struct rc_packet * packet, byte channel)
+{
+	if (channel >= 64) {
+		Serial.print(F("Illegal channel number: "));
+		Serial.println(channel);
+		return;
+	}
+
+	// Regular packet destined for remote node id
+	packet->hdr = RF12_HDR_DST | (RF12_HDR_MASK & rfm12b_remote_id);
+	packet->d.modify = 0;
+	packet->d.relative = 0;
+	packet->d.channel = channel;
+	packet->d.abs_value = 0;
+}
+
+void adjust_request(struct rc_packet * packet, byte channel, int8_t adjust)
+{
+	if (channel >= 64) {
+		Serial.print(F("Illegal channel number: "));
+		Serial.println(channel);
+		return;
+	}
+
+	// Regular packet destined for remote node id
+	packet->hdr = RF12_HDR_DST | (RF12_HDR_MASK & rfm12b_remote_id);
+	packet->d.modify = 1;
+	packet->d.relative = 1;
+	packet->d.channel = channel;
+	packet->d.rel_value = adjust;
+}
+
+bool service_out_buf(void)
+{
+	if (ob_write != ob_read && rf12_canSend()) {
+		// Send next scheduled packet
+		byte i = ob_read;
+		++ob_read %= ARRAY_LENGTH(out_buf);
+		struct rc_packet * p = out_buf + i;
+		rf12_sendStart(p->hdr, &(p->d), sizeof p->d);
+		Serial.print(F("Sending packet: "));
+		Serial.print(p->hdr, HEX);
+		print_byte_buf((byte *) &(p->d), sizeof p->d);
+		return true;
+	}
+	return false;
+}
+
 void loop(void)
 {
+	service_out_buf();
+	recv_update();
+
 	int events = process_inputs();
 
 	if (events & BTN_DOWN)
@@ -278,7 +456,6 @@ void loop(void)
 		print_state('<');
 	}
 
-	// TODO: RFM12B communication
 	// TODO: Low power mode
 	// TODO: Run on JeeNode Micro v2?
 }
