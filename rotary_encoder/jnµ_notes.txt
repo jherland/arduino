@@ -1,0 +1,100 @@
+ATtiny84:
+
+- PA0
+	- ADC0
+	- AREF - External analog reference
+	- PCINT0
+	* JP2:5
+- PA1
+	- ADC1
+	- AIN0 - Analog Comparator, positive input
+	- PCINT1
+	* JP2:8
+- PA2
+	- ADC2
+	- AIN1 - Analog Comparator, negative input
+	- PCINT2
+	* JP2:2
+- PA3
+	- ADC3
+	- T0 - Timer/Counter0 Clock Source
+	- PCINT3
+	* JP2:3
+- PA4
+	- ADC4
+	- USCK - USI Clock
+	- SCL - USI Clock
+	- T1 - Timer/Counter1 Clock Source
+	- PCINT4
+	* RFM12B:SCK
+	* SV1:3
+- PA5
+	- ADC5
+	- DO - USI Data Output
+	- MISO - SPI Master Data In/Slave Data Out
+	- OC1B - Timer/Counter1 Compare Match B Output
+	- PCINT5
+	* RFM12B:SDI
+	* SV1:1
+- PA6
+	- ADC6
+	- DI - USI Data Input
+	- SDA - USI Data Input
+	- MOSI - SPI Master Data Out/Slave Data In
+	- OC1A - Timer/Counter1 Compare Match A Output
+	- PCINT6
+	* RFM12B:SDO
+	* SV1:4
+- PA7
+	- ADC7
+	- OC0B - Timer/Counter0 Compare Match B Output
+	- ICP1 - Timer/Counter1 Input Capture Pin
+	- PCINT7
+	* JP2:9
+
+- PB0
+	- XTAL1 - Crystal Oscillator Input
+	- PCINT8
+	- CLKI - External Clock Input
+	* R2(10M)->VCC
+	* JP1:10
+- PB1
+	- XTAL2 - Crystal Oscillator Output
+	- PCINT9
+	* RFM12B:SEL
+- PB2
+	- INT0 - External Interrupt 0 Input
+	- OC0A - Timer/Counter0 Compare Match A output
+	- CKOUT - System Clock Output
+	- PCINT10
+	* RFM12B:IRQ
+- PB3
+	- !RESET - Reset pin
+	- dW - DebugWire I/O
+	- PCINT11
+	* R1(10Kohm)->VCC
+	* RESET->GND
+	* C2(0.1µF)->JP2:1
+	* SV1:5
+
+JeeNode Micro v2 JP2 pinout:
+	#	Label		Connected to
+	----------------------------------------------------------
+	1	F - FR		C2(0.1µF)->PB3 (!RESET/dW/PCINT11)
+	2	R - PA2/RX	PA2 (ADC2/AIN1/PCINT2)
+	3	T - PA3/TX	PA3 (ADC3/T0/PCINT3)
+	----------------------------------------------------------
+	4	P - PWR		PWR
+	5	D - PA0/DIO	PA0 (ADC0/AREF/PCINT0)
+	6	G - GND		GND
+	7	+ - +3V		VCC
+	8	A - AIO		PA1 (ADC1/AIN0/PCINT1)
+	9	I - IRQ		PA7 (ADC7/OC0B/ICP1/PCINT7)
+
+JeeNode Micro v2 ISP pinout:
+	1  #			RFM12B:SDI, PA5 (ADC5/DO/MISO/OC1B/PCINT5)
+	2 o			VCC
+	3  o			RFM12B:SCK, PA4 (ADC4/USCK/SCL/T1/PCINT4)
+	4 o			RFM12B:SDO, PA6 (ADC6/DI/SDA/MOSI/OC1A/PCINT6)
+	5  o			PB3 (!RESET/dW/PCINT11)
+	6 o	-		GND
