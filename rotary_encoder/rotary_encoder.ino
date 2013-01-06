@@ -336,7 +336,8 @@ void update_value(int increment)
 	// Display adjusted level
 	analogWrite(pwm_pins[cur_channel], 0xff - level);
 	// Ask for remote end to update its status
-	adjust_request(next_packet(), cur_channel, increment);
+	if (increment)
+		adjust_request(next_packet(), cur_channel, increment);
 }
 
 void print_state(char event)
@@ -372,10 +373,34 @@ bool recv_update(void)
 //			Serial.println(rf12_len);
 //			Serial.print(F("  rf12_data(hex):"));
 //			print_byte_buf(rf12_data, rf12_len);
+
+			if (rf12_len == 2) {
+				struct rc_data * d = (struct rc_data *) rf12_data;
+				if (!d->modify && !d->relative)
+					handle_status_update(d->channel, d->abs_value);
+			}
 			return true;
 		}
 	}
 	return false;
+}
+
+void handle_status_update(byte channel, uint8_t level)
+{
+	if (channel >= ARRAY_LENGTH(pwm_pins)) {
+		Serial.print(F("Illegal channel number: "));
+		Serial.println(channel);
+		return;
+	}
+
+	// Set channel according to status update
+	rot_values[channel] = level;
+	Serial.print(F("Adjusted channel #"));
+	Serial.print(channel);
+	Serial.print(F(" to "));
+	Serial.println(level);
+
+	update_value(0);
 }
 
 struct rc_packet * next_packet(void)
