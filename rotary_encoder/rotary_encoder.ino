@@ -104,7 +104,7 @@ const byte VERSION = 2;
 const byte rfm12b_band = RF12_868MHZ;
 const byte rfm12b_group = 123;
 const byte rfm12b_local_id = 13;
-const byte rfm12b_remote_id = 0;
+const byte rfm12b_remote_id = 1;
 
 volatile byte ring_buffer[256] = { 0 };
 volatile byte rb_write; // current write position in ring buffer
