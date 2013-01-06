@@ -79,13 +79,19 @@
  * a simple ring buffer. This keeps the ISR very short and fast, and
  * ensures that we miss as few interrupts as possible.
  *
- * The three PWM outputs are driven using analogWrite() from the main loop.
+ * The main loop, and associated functions read the input events from the
+ * ring buffer, and use them to drive a Controller node in a Remote
+ * Controller Network. See rcn_common.h in the RCN library for more
+ * information on RCN. As an RCN Controller, we control 3 different RCN
+ * Channels, and assign them to each of the R, G and B components of the
+ * RGB LED on the rotary encoder. The R/G/B components are drive by three
+ * PWM outputs, which are controlled by analogWrite().
  *
- * The main loop implements a 3-channel LED controller, where the
- * pushbutton is used to cycle through the Red/Green/Blue channels, and
- * rotation adjusts the level/value of the current channel. The RGB LED
- * displays the color of the current channel, with intensity proportional
- * to the level/value of the current channel.
+ * The pusbutton input is used to cycle through the 3 channels, and the
+ * current Channel is displayed in the corresponding (R, G or B) color on
+ * the RGB LED. The intensity of the color is proportional to the Level of
+ * the currently selected Channel. Rotating the knob adjusts the Level for
+ * the currently selected channel.
  *
  * Author: Johan Herland <johan@herland.net>
  * License: GNU GPL v2 or later
