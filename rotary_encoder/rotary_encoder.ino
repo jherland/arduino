@@ -102,8 +102,9 @@
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define LIMIT(min, val, max) (min > val ? min : (max < val) ? max : val)
 
-const byte VERSION = 2;
-const struct rfm12b_config config = { 15, RF12_868MHZ, 123 };
+const byte VERSION = 3;
+RCN_Node node(RF12_868MHZ, 123, 15);
+RCN_Node::RecvPacket recvd;
 const byte rcn_remote_host = 1;
 
 volatile byte ring_buffer[256] = { 0 };
@@ -154,9 +155,9 @@ void setup(void)
 
 	sei(); // Re-enable interrupts
 
-	rcn_init(&config, Serial);
+	node.init();
 
-	rcn_send_status_request(rcn_remote_host, cur_channel);
+	node.send_status_request(rcn_remote_host, cur_channel);
 
 	Serial.println(F("Ready"));
 }
@@ -248,7 +249,7 @@ void next_channel()
 	// Display level of the new channel
 	analogWrite(pwm_pins[cur_channel], 0xff - rot_values[cur_channel]);
 	// Ask for a status update on the current channel
-	rcn_send_status_request(rcn_remote_host, cur_channel);
+	node.send_status_request(rcn_remote_host, cur_channel);
 }
 
 void update_value(int8_t increment)
@@ -258,22 +259,22 @@ void update_value(int8_t increment)
 		int level = LIMIT(0x00, rot_values[cur_channel] + increment, 0xff);
 		rot_values[cur_channel] = level;
 		// Ask for remote end to update its status
-		rcn_send_update_request_rel(
+		node.send_update_request_rel(
 			rcn_remote_host, cur_channel, increment);
 	}
 	// Display adjusted level
 	analogWrite(pwm_pins[cur_channel], 0xff - rot_values[cur_channel]);
 }
 
-void handle_status_update(const struct rcn_payload *recvd)
+void handle_status_update(const RCN_Node::RecvPacket& p)
 {
-	if (recvd->channel >= ARRAY_LENGTH(pwm_pins)) {
+	if (p.channel() >= ARRAY_LENGTH(pwm_pins)) {
 		Serial.print(F("Illegal channel number: "));
-		Serial.println(recvd->channel);
+		Serial.println(p.channel());
 		return;
 	}
 
-	if (recvd->relative) {
+	if (p.relative()) {
 		Serial.println(F("Status update should not have relative "
 			"level!"));
 		return;
@@ -282,16 +283,16 @@ void handle_status_update(const struct rcn_payload *recvd)
 	// Set channel according to status update
 #ifdef DEBUG
 	Serial.print(F("Received status update for channel #"));
-	Serial.print(recvd->channel);
+	Serial.print(p.channel());
 	Serial.print(F(": "));
-	Serial.print(rot_values[recvd->channel]);
+	Serial.print(rot_values[p.channel()]);
 	Serial.print(F(" -> "));
-	Serial.println(recvd->abs_level);
+	Serial.println(p.abs_level());
 #endif
-	rot_values[recvd->channel] = recvd->abs_level;
+	rot_values[p.channel()] = p.abs_level();
 
 	// Trigger update of corresponding LED:
-	if (recvd->channel == cur_channel)
+	if (p.channel() == cur_channel)
 		update_value(0);
 }
 
@@ -306,8 +307,7 @@ void print_state(char event)
 
 void loop(void)
 {
-	const struct rcn_payload *recvd = rcn_send_and_recv();
-	if (recvd)
+	if (node.send_and_recv(recvd))
 		handle_status_update(recvd);
 
 	int events = process_inputs();

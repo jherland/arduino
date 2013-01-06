@@ -14,8 +14,9 @@
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
 #define LIMIT(min, val, max) (min > val ? min : (max < val) ? max : val)
 
-const byte VERSION = 2;
-const struct rfm12b_config config = { 1, RF12_868MHZ, 123 };
+const byte VERSION = 3;
+RCN_Node node(RF12_868MHZ, 123, 1);
+RCN_Node::RecvPacket recvd;
 const byte pwm_pins[3] = {5, 6, 9};
 
 byte rot_values[3] = { 0 }; // R/G/B channel values
@@ -26,72 +27,70 @@ void setup(void)
 	Serial.print(F("LED server version "));
 	Serial.println(VERSION);
 
-	rcn_init(&config, Serial);
+	node.init();
 
 	// Initialize R/G/B LEDs to all black
 	for (int i = 0; i < ARRAY_LENGTH(pwm_pins); i++) {
 		analogWrite(pwm_pins[i], 0);
-		rcn_send_status_update(i, 0);
+		node.send_status_update(i, 0);
 	}
 
 	Serial.println(F("Ready"));
 }
 
-void handle_update_request(const struct rcn_payload *recvd)
+void handle_update_request(const RCN_Node::RecvPacket& p)
 {
-	if (recvd->channel >= ARRAY_LENGTH(pwm_pins)) {
+	if (p.channel() >= ARRAY_LENGTH(pwm_pins)) {
 		Serial.print(F("Illegal channel number: "));
-		Serial.println(recvd->channel);
+		Serial.println(p.channel());
 		return;
 	}
 
-	if (recvd->relative && recvd->rel_level) {
-		// Adjust current channel, but limit to 0 <= level <= 255
-		int l = LIMIT(0x00, rot_values[recvd->channel] + recvd->rel_level, 0xff);
-#ifdef DEBUG
-		Serial.print(F("Adjusting channel #"));
-		Serial.print(recvd->channel);
-		Serial.print(F(": "));
-		Serial.print(rot_values[recvd->channel]);
-		Serial.print(F(" + "));
-		Serial.print(recvd->rel_level);
-		Serial.print(F(" =>"));
-		Serial.println(l);
-#endif
-		rot_values[recvd->channel] = l;
-	}
-	else if (recvd->relative) { // && recvd->rel_level == 0
+	if (p.relative() && p.rel_level() == 0) {
 #ifdef DEBUG
 		Serial.print(F("Status request for channel #"));
-		Serial.println(recvd->channel);
+		Serial.println(p.channel());
 #endif
 	}
-	else {
-		int l = LIMIT(0x00, recvd->abs_level, 0xff);
+	else if (p.relative()) { // relative adjustment
+		// Adjust current channel, but limit to 0 <= level <= 255
+		int l = rot_values[p.channel()] + p.rel_level();
+		l = LIMIT(0x00, l, 0xff);
 #ifdef DEBUG
-		Serial.print(F("Setting channel #"));
-		Serial.print(recvd->channel);
+		Serial.print(F("Adjusting channel #"));
+		Serial.print(p.channel());
 		Serial.print(F(": "));
-		Serial.print(rot_values[recvd->channel]);
-		Serial.print(F(" -> "));
-		Serial.print(recvd->abs_level);
-		Serial.print(F(" =>"));
+		Serial.print(rot_values[p.channel()]);
+		Serial.print(F(" + "));
+		Serial.print(p.rel_level());
+		Serial.print(F(" => "));
 		Serial.println(l);
 #endif
-		rot_values[recvd->channel] = l;
+		rot_values[p.channel()] = l;
+	}
+	else { // absolute assignment
+		int l = LIMIT(0x00, p.abs_level(), 0xff);
+#ifdef DEBUG
+		Serial.print(F("Setting channel #"));
+		Serial.print(p.channel());
+		Serial.print(F(": "));
+		Serial.print(rot_values[p.channel()]);
+		Serial.print(F(" -> "));
+		Serial.print(p.abs_level());
+		Serial.print(F(" => "));
+		Serial.println(l);
+#endif
+		rot_values[p.channel()] = l;
 	}
 
+	// Refresh corresponding LED
+	analogWrite(pwm_pins[p.channel()], rot_values[p.channel()]);
 	// Send status update as reply
-	rcn_send_status_update(recvd->channel, rot_values[recvd->channel]);
+	node.send_status_update(p.channel(), rot_values[p.channel()]);
 }
 
 void loop(void)
 {
-	const struct rcn_payload *recvd = rcn_send_and_recv();
-	if (recvd)
+	if (node.send_and_recv(recvd))
 		handle_update_request(recvd);
-
-	// Refresh R/G/B LEDs
-	for (int i = 0; i < ARRAY_LENGTH(pwm_pins); i++)
-		analogWrite(pwm_pins[i], rot_values[i]);
 }
