@@ -1,3 +1,7 @@
 [submodule "jeelib"]
 	path = libraries/JeeLib
 	url = git://github.com/jcw/jeelib.git
+
+[submodule "remote_control_network"]
+	path = libraries/remote_control_network
+	url = git://github.com/jherland/remote_control_network.git
