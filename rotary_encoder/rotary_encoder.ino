@@ -362,16 +362,16 @@ void print_byte_buf(volatile byte * buf, size_t len)
 bool recv_update(void)
 {
 	if (rf12_recvDone()) {
-		Serial.println(F("Received RFM12B communication:"));
+//		Serial.println(F("Received RFM12B communication:"));
 		if (rf12_crc)
 			Serial.println(F("  CRC mismatch. Discarding!"));
 		else {
-			Serial.print(F("  rf12_hdr: 0x"));
-			Serial.println(rf12_hdr, HEX);
-			Serial.print(F("  rf12_len: "));
-			Serial.println(rf12_len);
-			Serial.print(F("  rf12_data(hex):"));
-			print_byte_buf(rf12_data, rf12_len);
+//			Serial.print(F("  rf12_hdr: 0x"));
+//			Serial.println(rf12_hdr, HEX);
+//			Serial.print(F("  rf12_len: "));
+//			Serial.println(rf12_len);
+//			Serial.print(F("  rf12_data(hex):"));
+//			print_byte_buf(rf12_data, rf12_len);
 			return true;
 		}
 	}
