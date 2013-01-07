@@ -335,5 +335,6 @@ void loop(void)
 	}
 
 	// TODO: Low power mode
+	// TODO: Better pushbutton debouncing. Use msec timer built on Timer2?
 	// TODO: Run on JeeNode Micro v2?
 }
