@@ -100,7 +100,7 @@
 // #define DEBUG 1
 
 #include <RF12.h> // Needed by rcn_common.h
-#include <rcn_common.h>
+#include <rcn_common.h> // Needs RCN_Node
 
 // Utility macros
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
