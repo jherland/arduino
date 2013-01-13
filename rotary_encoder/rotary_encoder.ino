@@ -127,6 +127,7 @@ byte rb_read; // current read position in ringbuffer
 
 byte rot_state = 0;
 bool button_state = 0;
+bool button_debounce = 0;
 
 byte rot_values[3] = { 0 }; // R/G/B channel values
 byte cur_channel = 0; // Index into above array
@@ -159,15 +160,15 @@ void setup(void)
 		analogWrite(pwm_pins[i], 0xff);
 
 	/*
-	 * In addition to the above, we will use the Timer/Counter1
-	 * overflow interrupt as a crude debouncing timer for the
-	 * pushbutton: When a pushbutton event happens, we'll reset the
-	 * Counter1 value to 0, and enable the overflow interrupt. If more
-	 * pushbutton events happen, we'll reset the counter. When the
-	 * overflow interrupt finally happens (after ~2.4ms, a side effect
-	 * of how analogWrite() sets up the PWM-ing), we'll disable the
-	 * interrupt, and do a "proper" reading of the pushbutton state.
+	 * Finally, we will use the Timer/Counter2 overflow interrupt
+	 * (TOV2) as a general purpose timer. It will be used for
+	 * debouncing and idle detection, so high resolution is not
+	 * particularily important. We therefore use the highest prescaler
+	 * available for this times, which yields a TOV2 freq. of ~61Hz.
 	 */
+	TCCR2B |= B00000111; // FOC2A FOC2B - - WGM22 CS22 CS21 CS20
+	TCNT2 = 0; // Reset Counter2
+	TIMSK2 |= 1; // Set TOIE2 to enable TOV2 interrupt
 
 	sei(); // Re-enable interrupts
 
@@ -181,24 +182,22 @@ void setup(void)
 /*
  * PCINT1 interrupt vector
  *
- * Append the current values of the relevant input port to the ring buffer.
+ * Append the current values of the input pins to the ring buffer.
  */
 ISR(PCINT1_vect)
 {
 	ring_buffer[rb_write++] = PINC & B00000111;
 }
 
-ISR(TIMER1_OVF_vect)
+/*
+ * TOV2 interrupt vector
+ *
+ * Append the current values of the input pins plus a "timer" bit to the
+ * ring buffer.
+ */
+ISR(TIMER2_OVF_vect)
 {
-	TIMSK1 &= ~1; // Unset TOIE1 to disable Timer1 overflow interrupt
 	ring_buffer[rb_write++] = (PINC & B00000111) | B00001000;
-}
-
-void start_debounce_timer(void)
-{
-	// Reset Counter1 value, and enable overflow interrupt
-	TCNT1 = 0; // Reset Counter1
-	TIMSK1 |= 1; // Set TOIE1 to enable Timer1 overflow interrupt
 }
 
 enum input_events {
@@ -221,15 +220,20 @@ int process_inputs(void)
 
 	// Process the next input event in the ring buffer
 
+	// Did the periodic timer trigger this event?
+	bool tick = ring_buffer[rb_read] & B1000;
+
 	// Did the pushbutton change since last reading?
-	bool debounced = ring_buffer[rb_read] & B1000;
 	bool button_pin = ring_buffer[rb_read] & B0100;
 	if (button_pin != button_state) {
-		if (!debounced)
-			start_debounce_timer();
-		else {
+		if (button_debounce && tick) { // debounce period expired
 			events |= button_pin ? BTN_DOWN : BTN_UP;
 			button_state = button_pin;
+			button_debounce = false;
+		}
+		else { // start debounce period
+			TCNT2 = 0; // Reset timer to delay next tick
+			button_debounce = true;
 		}
 	}
 
@@ -342,6 +346,5 @@ void loop(void)
 	}
 
 	// TODO: Low power mode
-	// TODO: Better pushbutton debouncing. Use msec timer built on Timer2?
 	// TODO: Run on JeeNode Micro v2?
 }
