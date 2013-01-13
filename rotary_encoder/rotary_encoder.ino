@@ -118,8 +118,9 @@
 
 const byte VERSION = 3;
 RCN_Node node(RF12_868MHZ, 123, 15);
-RCN_Node::RecvPacket recvd;
-const byte rcn_remote_host = 1;
+RCN_Node::RecvPacket recvd; // RCN packet receive buffer
+const byte rcn_remote_host = 1; // RFM12B node ID of remote RCN node
+const unsigned long max_idle_time = 5000; // msecs until we go to sleep
 
 volatile byte ring_buffer[256] = { 0 };
 volatile byte rb_write; // current write position in ring buffer
@@ -133,6 +134,8 @@ byte rot_values[3] = { 0 }; // R/G/B channel values
 byte cur_channel = 0; // Index into above array
 
 const byte pwm_pins[3] = {5, 6, 9};
+
+unsigned long last_activity = 0;
 
 void setup(void)
 {
@@ -209,6 +212,7 @@ enum input_events {
 	ROT_CCW  = 2, // Mutually exclusive with ROT_CW.
 	BTN_DOWN = 4, // Mutually exclusive with BTN_UP.
 	BTN_UP   = 8, // Mutually exclusive with BTN_DOWN.
+	IDLE    = 16, // Set when max_idle_time has passed w/o activity
 };
 
 /*
@@ -260,6 +264,13 @@ int process_inputs(void)
 	}
 
 	rb_read++;
+
+	// Check for idleness
+	if (events)
+		last_activity = millis();
+	else if (tick && (millis() - last_activity > max_idle_time))
+		events = IDLE;
+
 	return events;
 }
 
@@ -346,6 +357,10 @@ void loop(void)
 	else if (events & ROT_CCW) {
 		update_value(-MAX(1, rot_values[cur_channel] / 3));
 		print_state('<');
+	}
+
+	if (events & IDLE) {
+		LOGln(F("IDLE"));
 	}
 
 	// TODO: Low power mode
