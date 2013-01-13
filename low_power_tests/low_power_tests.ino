@@ -3,6 +3,9 @@
 
 void setup(void)
 {
+	// Disable A/D converter to save power
+	ADCSRA &= ~ bit(ADEN);
+
 	// Wait 5 seconds to allow measuring "regular" power use
 	delay(5000);
 
