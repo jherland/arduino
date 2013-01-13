@@ -6,6 +6,7 @@
  */
 
 // #define DEBUG 1
+#define LOG Serial.print
 
 #include <RF12.h> // Needed by rcn_common.h
 #include <rcn_common.h>

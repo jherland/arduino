@@ -99,6 +99,14 @@
 
 // #define DEBUG 1
 
+#if DEBUG
+#define LOG Serial.print
+#define LOGln Serial.println
+#else
+#define LOG(...)
+#define LOGln(...)
+#endif
+
 #include <RF12.h> // Needed by rcn_common.h
 #include <rcn_common.h> // Needs RCN_Node
 
@@ -127,7 +135,9 @@ const byte pwm_pins[3] = {5, 6, 9};
 
 void setup(void)
 {
+#if DEBUG
 	Serial.begin(115200);
+#endif
 
 	cli(); // Disable interrupts while setting up
 
@@ -165,7 +175,7 @@ void setup(void)
 
 	node.send_status_request(rcn_remote_host, cur_channel);
 
-	Serial.println(F("Ready"));
+	LOGln(F("Ready"));
 }
 
 /*
@@ -206,8 +216,8 @@ enum input_events {
 int process_inputs(void)
 {
 	int events = NO_EVENT;
-	if (rb_read == rb_write)
-		return NO_EVENT; // Nothing has been added to the ring buffer
+	if (rb_read == rb_write) // Nothing added to the ring buffer
+		return NO_EVENT;
 
 	// Process the next input event in the ring buffer
 
@@ -258,15 +268,15 @@ void next_channel()
 	node.send_status_request(rcn_remote_host, cur_channel);
 }
 
-void update_value(int8_t increment)
+void update_value(int8_t incr)
 {
-	if (increment) {
-		// Adjust current channel, but limit to 0 <= level <= 255
-		int level = LIMIT(0x00, rot_values[cur_channel] + increment, 0xff);
-		rot_values[cur_channel] = level;
+	if (incr) {
+		// Adjust current channel, but limit to 0 <= l <= 255
+		int l = LIMIT(0x00, rot_values[cur_channel] + incr, 0xff);
+		rot_values[cur_channel] = l;
 		// Ask for remote end to update its status
 		node.send_update_request_rel(
-			rcn_remote_host, cur_channel, increment);
+			rcn_remote_host, cur_channel, incr);
 	}
 	// Display adjusted level
 	analogWrite(pwm_pins[cur_channel], 0xff - rot_values[cur_channel]);
@@ -275,26 +285,23 @@ void update_value(int8_t increment)
 void handle_status_update(const RCN_Node::RecvPacket& p)
 {
 	if (p.channel() >= ARRAY_LENGTH(pwm_pins)) {
-		Serial.print(F("Illegal channel number: "));
-		Serial.println(p.channel());
+		LOG(F("Illegal channel number: "));
+		LOGln(p.channel());
 		return;
 	}
 
 	if (p.relative()) {
-		Serial.println(F("Status update should not have relative "
-			"level!"));
+		LOGln(F("Status update should not have relative level!"));
 		return;
 	}
 
 	// Set channel according to status update
-#ifdef DEBUG
-	Serial.print(F("Received status update for channel #"));
-	Serial.print(p.channel());
-	Serial.print(F(": "));
-	Serial.print(rot_values[p.channel()]);
-	Serial.print(F(" -> "));
-	Serial.println(p.abs_level());
-#endif
+	LOG(F("Received status update for channel #"));
+	LOG(p.channel());
+	LOG(F(": "));
+	LOG(rot_values[p.channel()]);
+	LOG(F(" -> "));
+	LOGln(p.abs_level());
 	rot_values[p.channel()] = p.abs_level();
 
 	// Trigger update of corresponding LED:
@@ -304,11 +311,11 @@ void handle_status_update(const RCN_Node::RecvPacket& p)
 
 void print_state(char event)
 {
-	Serial.print(event);
-	Serial.print(F(" "));
-	Serial.print(cur_channel);
-	Serial.print(F(":"));
-	Serial.println(rot_values[cur_channel]);
+	LOG(event);
+	LOG(F(" "));
+	LOG(cur_channel);
+	LOG(F(":"));
+	LOGln(rot_values[cur_channel]);
 }
 
 void loop(void)
