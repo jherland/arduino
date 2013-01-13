@@ -108,6 +108,7 @@
 #endif
 
 #include <RF12.h> // Needed by rcn_common.h
+#include <Ports.h> // Needs Sleepy::*
 #include <rcn_common.h> // Needs RCN_Node
 
 // Utility macros
@@ -336,6 +337,46 @@ void print_state(char event)
 	LOGln(rot_values[cur_channel]);
 }
 
+/*
+ * Return false immediately if we cannot go to sleep, or go to sleep, and
+ * return true when it's time to wake up again.
+ */
+bool go_to_sleep()
+{
+	if (rb_read != rb_write) // There is input to be processed
+		return false;
+	if (!node.go_to_sleep()) // RCN network node is busy
+		return false;
+
+	LOGln(F("Going to sleep..."));
+	// Disable PWM outputs
+	for (int i = 0; i < ARRAY_LENGTH(pwm_pins); i++)
+		digitalWrite(pwm_pins[i], HIGH);
+
+	// Blink red LED thrice to signal power-down
+	for (int i = 0; i < 3; i++) {
+		digitalWrite(pwm_pins[0], HIGH);
+		delay(200);
+		digitalWrite(pwm_pins[0], LOW);
+		delay(200);
+	}
+	digitalWrite(pwm_pins[0], HIGH);
+#if DEBUG
+	Serial.flush();
+#endif
+	Sleepy::powerDown();
+	return true;
+}
+
+void wake_up()
+{
+	LOGln(F("Waking up..."));
+	node.wake_up();
+	// Re-enable PWM output
+	update_value(0);
+	last_activity = millis();
+}
+
 void loop(void)
 {
 	if (node.send_and_recv(recvd))
@@ -359,9 +400,8 @@ void loop(void)
 		print_state('<');
 	}
 
-	if (events & IDLE) {
-		LOGln(F("IDLE"));
-	}
+	if (events & IDLE && go_to_sleep())
+		wake_up();
 
 	// TODO: Low power mode
 	// TODO: Run on JeeNode Micro v2?
