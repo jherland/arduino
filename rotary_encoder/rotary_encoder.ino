@@ -142,6 +142,9 @@ void setup(void)
 
 	cli(); // Disable interrupts while setting up
 
+	// Disable unused A/D converter to save power.
+	ADCSRA &= ~ bit(ADEN);
+
 	// Set up input pins (Arduino pins A0..A2 == PORTC pins 0..2).
 	// Set PC0..2 as inputs:
 	DDRC &= ~B00000111;
