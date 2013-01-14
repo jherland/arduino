@@ -121,7 +121,7 @@ const byte VERSION = 3;
 RCN_Node node(RF12_868MHZ, 123, 15);
 RCN_Node::RecvPacket recvd; // RCN packet receive buffer
 const byte rcn_remote_host = 1; // RFM12B node ID of remote RCN node
-const unsigned long max_idle_time = 5000; // msecs until we go to sleep
+const unsigned long max_idle_time = 10000; // msecs until we go to sleep
 
 volatile byte ring_buffer[256] = { 0 };
 volatile byte rb_write; // current write position in ring buffer
@@ -137,6 +137,7 @@ byte cur_channel = 0; // Index into above array
 const byte pwm_pins[3] = {5, 6, 9};
 
 unsigned long last_activity = 0;
+bool groggy = false; // Set to true, when we've just woken up from sleep
 
 void setup(void)
 {
@@ -234,7 +235,11 @@ int process_inputs(void)
 	// Did the pushbutton change since last reading?
 	bool button_pin = ring_buffer[rb_read] & B0100;
 	if (button_pin != button_state) {
-		if (button_debounce && tick) { // debounce period expired
+		if (groggy) { // disregard the button push that woke us up
+			button_state = button_pin;
+			groggy = button_pin; // disable groggy on release
+		}
+		else if (button_debounce && tick) { // debounce finished
 			events |= button_pin ? BTN_DOWN : BTN_UP;
 			button_state = button_pin;
 			button_debounce = false;
@@ -267,7 +272,7 @@ int process_inputs(void)
 	rb_read++;
 
 	// Check for idleness
-	if (events)
+	if (events || groggy)
 		last_activity = millis();
 	else if (tick && (millis() - last_activity > max_idle_time))
 		events = IDLE;
@@ -349,6 +354,13 @@ bool go_to_sleep()
 		return false;
 
 	LOGln(F("Going to sleep..."));
+
+	// Change PCINT8..10 to trigger only on A2 (pushbutton).
+	PCMSK1 = B00000100; // - PCINT14 .. PCINT8
+
+	// Disable periodic timer interrupt
+	TIMSK2 &= ~1; // Clear TOIE2 to disable TOV2 interrupt
+
 	// Disable PWM outputs
 	for (int i = 0; i < ARRAY_LENGTH(pwm_pins); i++)
 		digitalWrite(pwm_pins[i], HIGH);
@@ -372,9 +384,18 @@ void wake_up()
 {
 	LOGln(F("Waking up..."));
 	node.wake_up();
+
+	// Tell process_inputs() that we have just woken up
+	groggy = true;
+
 	// Re-enable PWM output
 	update_value(0);
-	last_activity = millis();
+
+	// Re-enable periodic timer interrupt
+	TIMSK2 |= 1; // Set TOIE2 to enable TOV2 interrupt
+
+	// Change PCINT8..10 to trigger only on A0..A2
+	PCMSK1 = B00000111; // - PCINT14 .. PCINT8
 }
 
 void loop(void)
