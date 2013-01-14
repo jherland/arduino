@@ -402,7 +402,4 @@ void loop(void)
 
 	if (events & IDLE && go_to_sleep())
 		wake_up();
-
-	// TODO: Low power mode
-	// TODO: Run on JeeNode Micro v2?
 }
