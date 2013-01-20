@@ -122,6 +122,7 @@ RCN_Node node(RF12_868MHZ, 123, 15);
 RCN_Node::RecvPacket recvd; // RCN packet receive buffer
 const byte rcn_remote_host = 1; // RFM12B node ID of remote RCN node
 const unsigned long max_idle_time = 10000; // msecs until we go to sleep
+const unsigned long long_click_time = 3000; // min msecs for long-click
 
 volatile byte ring_buffer[256] = { 0 };
 volatile byte rb_write; // current write position in ring buffer
@@ -210,12 +211,13 @@ ISR(TIMER2_OVF_vect)
 }
 
 enum input_events {
-	NO_EVENT = 0,
-	ROT_CW   = 1, // Mutually exclusive with ROT_CCW.
-	ROT_CCW  = 2, // Mutually exclusive with ROT_CW.
-	BTN_DOWN = 4, // Mutually exclusive with BTN_UP.
-	BTN_UP   = 8, // Mutually exclusive with BTN_DOWN.
-	IDLE    = 16, // Set when max_idle_time has passed w/o activity
+	NO_EVENT   = 0,
+	ROT_CW     = 1,  // Mutually exclusive with ROT_CCW.
+	ROT_CCW    = 2,  // Mutually exclusive with ROT_CW.
+	BTN_DOWN   = 4,  // Mutually exclusive with BTN_UP.
+	BTN_UP     = 8,  // Mutually exclusive with BTN_DOWN.
+	IDLE       = 16, // Set when max_idle_time has passed w/o activity
+	LONG_CLICK = 32, // Set when button press > long_click_time
 };
 
 /*
@@ -275,9 +277,13 @@ int process_inputs(void)
 	// Check for idleness
 	if (events || groggy)
 		last_activity = millis();
-	else if (tick && (millis() - last_activity > max_idle_time))
-		events = IDLE;
-
+	else if (tick) {
+		unsigned long inactivity = millis() - last_activity;
+		if (button_state && inactivity > long_click_time)
+			events |= LONG_CLICK;
+		else if (inactivity > max_idle_time)
+			events = IDLE;
+	}
 	return events;
 }
 
@@ -377,6 +383,14 @@ bool go_to_sleep()
 	Serial.flush();
 #endif
 	Sleepy::powerDown();
+
+	// If we fell asleep because of long-click, we need to swallow the
+	// following button release without waking up.
+	if (rb_write == rb_read + 1
+	 && (ring_buffer[rb_read] & B1111) == B0011) {
+		rb_read++; // Skip button release
+		Sleepy::powerDown(); // Keep sleeping
+	}
 	return true;
 }
 
@@ -433,6 +447,6 @@ void loop(void)
 		print_state('<');
 	}
 
-	if (events & IDLE && go_to_sleep())
+	if (events & (LONG_CLICK | IDLE) && go_to_sleep())
 		wake_up();
 }
