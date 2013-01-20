@@ -361,18 +361,17 @@ bool go_to_sleep()
 	// Disable periodic timer interrupt
 	TIMSK2 &= ~1; // Clear TOIE2 to disable TOV2 interrupt
 
+	// Animate LEDs to signal power-down
+	for (int i = 0; i < 0xff; i += MIN(MAX(i / 10, 1), 0xff)) {
+		for (int j = 0; j < 3; j++)
+			analogWrite(pwm_pins[j], i);
+		delay(5);
+	}
+
 	// Disable PWM outputs
 	for (int i = 0; i < ARRAY_LENGTH(pwm_pins); i++)
 		digitalWrite(pwm_pins[i], HIGH);
 
-	// Blink red LED thrice to signal power-down
-	for (int i = 0; i < 3; i++) {
-		digitalWrite(pwm_pins[0], HIGH);
-		delay(200);
-		digitalWrite(pwm_pins[0], LOW);
-		delay(200);
-	}
-	digitalWrite(pwm_pins[0], HIGH);
 #if DEBUG
 	Serial.flush();
 #endif
@@ -384,6 +383,15 @@ void wake_up()
 {
 	LOGln(F("Waking up..."));
 	node.wake_up();
+
+	// Animate LEDs to signal wakeup
+	for (int i = 0; i < 0xff; i += MIN(MAX(i / 10, 1), 0xff)) {
+		for (int j = 0; j < 3; j++)
+			analogWrite(pwm_pins[j], 0xff - i);
+		delay(5);
+	}
+	for (int j = 0; j < 3; j++)
+		digitalWrite(pwm_pins[j], HIGH);
 
 	// Tell process_inputs() that we have just woken up
 	groggy = true;
