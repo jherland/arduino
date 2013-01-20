@@ -182,6 +182,7 @@ void setup(void)
 
 	node.init();
 
+	// Request current channel level
 	node.send_status_request(rcn_remote_host, cur_channel);
 
 	LOGln(F("Ready"));
@@ -404,6 +405,9 @@ void wake_up()
 
 	// Change PCINT8..10 to trigger only on A0..A2
 	PCMSK1 = B00000111; // - PCINT14 .. PCINT8
+
+	// Request current channel level
+	node.send_status_request(rcn_remote_host, cur_channel);
 }
 
 void loop(void)
