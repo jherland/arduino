@@ -18,7 +18,7 @@
 #define RCN_HOST_MAX_CHANNELS 7
 
 #include <RF12.h> // Needed by RCN
-#include <rcn_host.h>
+#include <rcn_host.h> // Needs RCN_Host
 
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
 
@@ -56,7 +56,7 @@ void setup(void)
 	// Initialize one channel for each pin.
 	for (int i = 0; i < ARRAY_LENGTH(PINS); i++) {
 		pinMode(PINS[i], OUTPUT);
-		host.addChannel(RANGES[i], 0, PINS[i]);
+		host.add_channel(RANGES[i], 0, PINS[i]);
 	}
 
 #if DEBUG
