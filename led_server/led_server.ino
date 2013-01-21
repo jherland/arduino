@@ -42,10 +42,11 @@ RCN_Host host(RF12_868MHZ, 123, 1, update_filter);
 
 void setup(void)
 {
+#if DEBUG
 	Serial.begin(115200);
 	Serial.print(F("LED server version "));
 	Serial.println(VERSION);
-
+#endif
 	host.init();
 
 	// Initialize one channel for each PWM pin.
@@ -53,7 +54,9 @@ void setup(void)
 		host.addChannel(0xff, 0, PWM_PINS[i]);
 	}
 
+#if DEBUG
 	Serial.println(F("Ready"));
+#endif
 }
 
 void loop(void)
