@@ -107,9 +107,11 @@
 #define LOGln(...)
 #endif
 
-#include <RF12.h> // Needed by rcn_common.h
+#define RCN_CTRL_MAX_CHANNELS 3
+
+#include <RF12.h> // Needed by RCN
 #include <Ports.h> // Needs Sleepy::*
-#include <rcn_common.h> // Needs RCN_Node
+#include <rcn_controller.h> // Needs RCN_Controller
 
 // Utility macros
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
@@ -117,10 +119,7 @@
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define LIMIT(min, val, max) (min > val ? min : (max < val) ? max : val)
 
-const byte VERSION = 3;
-RCN_Node node(RF12_868MHZ, 123, 15);
-RCN_Node::RecvPacket recvd; // RCN packet receive buffer
-const byte rcn_remote_host = 1; // RFM12B node ID of remote RCN node
+const byte VERSION = 4;
 const unsigned long max_idle_time = 10000; // msecs until we go to sleep
 const unsigned long long_click_time = 3000; // min msecs for long-click
 
@@ -132,13 +131,44 @@ byte rot_state = 0;
 bool button_state = 0;
 bool button_debounce = 0;
 
-byte rot_values[3] = { 0 }; // R/G/B channel values
 byte cur_channel = 0; // Index into above array
 
-const byte pwm_pins[3] = {5, 6, 9};
+const byte PWM_PINS[RCN_CTRL_MAX_CHANNELS] = {5, 6, 9};
 
 unsigned long last_activity = 0;
 bool groggy = false; // Set to true, when we've just woken up from sleep
+
+void update_notify(
+	uint8_t channel, // The channel id
+	uint8_t range, // The registered range for this channel
+	uint8_t data, // The auxiliary data for this channel
+	uint8_t old_level, // The old/previous level
+	uint8_t new_level) // The new/current level
+{
+	LOG(F("update_notify("));
+	LOG(channel);
+	LOG(F(", "));
+	LOG(range);
+	LOG(F(", "));
+	LOG(data);
+	LOG(F(", "));
+	LOG(old_level);
+	LOG(F(", "));
+	LOG(new_level);
+	LOGln(F(")"));
+
+	if (channel == cur_channel) { // Display adjusted level
+		for (int i = 0; i < ARRAY_LENGTH(PWM_PINS); i++) {
+			if (PWM_PINS[i] == data)
+				analogWrite(PWM_PINS[i], 0xff - new_level);
+			else
+				analogWrite(PWM_PINS[i], 0xff);
+		}
+
+	}
+}
+
+RCN_Controller ctrl(RF12_868MHZ, 123, 16, update_notify);
 
 void setup(void)
 {
@@ -164,9 +194,6 @@ void setup(void)
 	// Set up pins 5/6/9 (D5/D6/B1) as output (for PWM)
 	DDRD |= B01100000;
 	DDRB |= B00000010;
-	// Initialize RGB LED to all black
-	for (int i = 0; i < ARRAY_LENGTH(pwm_pins); i++)
-		analogWrite(pwm_pins[i], 0xff);
 
 	/*
 	 * Finally, we will use the Timer/Counter2 overflow interrupt
@@ -181,12 +208,20 @@ void setup(void)
 
 	sei(); // Re-enable interrupts
 
-	node.init();
+	ctrl.init();
+
+	// Initialize one channel for each PWM pin.
+	for (int i = 0; i < ARRAY_LENGTH(PWM_PINS); i++) {
+		pinMode(PWM_PINS[i], OUTPUT);
+		ctrl.add_channel(0xff, 0, PWM_PINS[i]);
+	}
 
 	// Request current channel level
-	node.send_status_request(rcn_remote_host, cur_channel);
+	ctrl.sync(cur_channel);
 
+#if DEBUG
 	LOGln(F("Ready"));
+#endif
 }
 
 /*
@@ -290,54 +325,13 @@ int process_inputs(void)
 void next_channel()
 {
 	// Stop displaying current channel
-	analogWrite(pwm_pins[cur_channel], 0xff);
+	analogWrite(PWM_PINS[cur_channel], 0xff);
 	// Go to next channel
-	++cur_channel %= ARRAY_LENGTH(rot_values);
+	++cur_channel %= ctrl.num_channels();
 	// Display level of the new channel
-	analogWrite(pwm_pins[cur_channel], 0xff - rot_values[cur_channel]);
+	analogWrite(PWM_PINS[cur_channel], 0xff - ctrl.get(cur_channel));
 	// Ask for a status update on the current channel
-	node.send_status_request(rcn_remote_host, cur_channel);
-}
-
-void update_value(int8_t incr)
-{
-	if (incr) {
-		// Adjust current channel, but limit to 0 <= l <= 255
-		int l = LIMIT(0x00, rot_values[cur_channel] + incr, 0xff);
-		rot_values[cur_channel] = l;
-		// Ask for remote end to update its status
-		node.send_update_request_rel(
-			rcn_remote_host, cur_channel, incr);
-	}
-	// Display adjusted level
-	analogWrite(pwm_pins[cur_channel], 0xff - rot_values[cur_channel]);
-}
-
-void handle_status_update(const RCN_Node::RecvPacket& p)
-{
-	if (p.channel() >= ARRAY_LENGTH(pwm_pins)) {
-		LOG(F("Illegal channel number: "));
-		LOGln(p.channel());
-		return;
-	}
-
-	if (p.relative()) {
-		LOGln(F("Status update should not have relative level!"));
-		return;
-	}
-
-	// Set channel according to status update
-	LOG(F("Received status update for channel #"));
-	LOG(p.channel());
-	LOG(F(": "));
-	LOG(rot_values[p.channel()]);
-	LOG(F(" -> "));
-	LOGln(p.abs_level());
-	rot_values[p.channel()] = p.abs_level();
-
-	// Trigger update of corresponding LED:
-	if (p.channel() == cur_channel)
-		update_value(0);
+	ctrl.sync(cur_channel);
 }
 
 void print_state(char event)
@@ -346,7 +340,7 @@ void print_state(char event)
 	LOG(F(" "));
 	LOG(cur_channel);
 	LOG(F(":"));
-	LOGln(rot_values[cur_channel]);
+	LOGln(ctrl.get(cur_channel));
 }
 
 /*
@@ -357,7 +351,7 @@ bool go_to_sleep()
 {
 	if (rb_read != rb_write) // There is input to be processed
 		return false;
-	if (!node.go_to_sleep()) // RCN network node is busy
+	if (!ctrl.go_to_sleep()) // RCN network is busy
 		return false;
 
 	LOGln(F("Going to sleep..."));
@@ -371,13 +365,13 @@ bool go_to_sleep()
 	// Animate LEDs to signal power-down
 	for (int i = 0; i < 0xff; i += MIN(MAX(i / 10, 1), 0xff)) {
 		for (int j = 0; j < 3; j++)
-			analogWrite(pwm_pins[j], i);
+			analogWrite(PWM_PINS[j], i);
 		delay(5);
 	}
 
 	// Disable PWM outputs
-	for (int i = 0; i < ARRAY_LENGTH(pwm_pins); i++)
-		digitalWrite(pwm_pins[i], HIGH);
+	for (int i = 0; i < ARRAY_LENGTH(PWM_PINS); i++)
+		digitalWrite(PWM_PINS[i], HIGH);
 
 #if DEBUG
 	Serial.flush();
@@ -397,22 +391,22 @@ bool go_to_sleep()
 void wake_up()
 {
 	LOGln(F("Waking up..."));
-	node.wake_up();
+	ctrl.wake_up();
 
 	// Animate LEDs to signal wakeup
 	for (int i = 0; i < 0xff; i += MIN(MAX(i / 10, 1), 0xff)) {
 		for (int j = 0; j < 3; j++)
-			analogWrite(pwm_pins[j], 0xff - i);
+			analogWrite(PWM_PINS[j], 0xff - i);
 		delay(5);
 	}
 	for (int j = 0; j < 3; j++)
-		digitalWrite(pwm_pins[j], HIGH);
+		digitalWrite(PWM_PINS[j], HIGH);
 
 	// Tell process_inputs() that we have just woken up
 	groggy = true;
 
 	// Re-enable PWM output
-	update_value(0);
+	ctrl.adjust(cur_channel, 0);
 
 	// Re-enable periodic timer interrupt
 	TIMSK2 |= 1; // Set TOIE2 to enable TOV2 interrupt
@@ -421,13 +415,12 @@ void wake_up()
 	PCMSK1 = B00000111; // - PCINT14 .. PCINT8
 
 	// Request current channel level
-	node.send_status_request(rcn_remote_host, cur_channel);
+	ctrl.sync(cur_channel);
 }
 
 void loop(void)
 {
-	if (node.send_and_recv(recvd))
-		handle_status_update(recvd);
+	ctrl.run();
 
 	int events = process_inputs();
 
@@ -439,11 +432,11 @@ void loop(void)
 	}
 
 	if (events & ROT_CW) {
-		update_value(MAX(1, rot_values[cur_channel] / 2));
+		ctrl.adjust(cur_channel, MAX(1, ctrl.get(cur_channel) / 2));
 		print_state('>');
 	}
 	else if (events & ROT_CCW) {
-		update_value(-MAX(1, rot_values[cur_channel] / 3));
+		ctrl.adjust(cur_channel, -MAX(1, ctrl.get(cur_channel) / 3));
 		print_state('<');
 	}
 
