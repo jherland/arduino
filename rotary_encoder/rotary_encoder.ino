@@ -435,7 +435,7 @@ void wake_up()
 #if DEBUG
 	LOGln(F("Waking up..."));
 #endif
-	ctrl.wake_up();
+	ctrl.wake_up(true);
 
 	// Animate LEDs to signal wakeup
 	for (int i = 0; i < 0xff; i += MIN(MAX(i / 10, 1), 0xff)) {
