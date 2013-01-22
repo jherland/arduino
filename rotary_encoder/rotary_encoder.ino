@@ -364,16 +364,6 @@ int process_inputs(void)
 	return events;
 }
 
-void next_channel()
-{
-	// Go to next channel
-	++cur_channel %= ctrl.num_channels();
-	// Display level of the new channel
-	ctrl.adjust(cur_channel, 0);
-	// Ask for a status update on the new channel
-	ctrl.sync(cur_channel);
-}
-
 void print_state(char event)
 {
 #if DEBUG
@@ -468,7 +458,12 @@ void loop(void)
 	if (events & BTN_DOWN)
 		print_state('v');
 	else if (events & BTN_UP) {
-		next_channel();
+		// Go to next channel
+		++cur_channel %= ctrl.num_channels();
+		// Display level of the new channel
+		ctrl.adjust(cur_channel, 0);
+		// Ask for a status update on the new channel
+		ctrl.sync(cur_channel);
 		print_state('^');
 	}
 
