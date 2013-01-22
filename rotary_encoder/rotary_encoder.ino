@@ -183,6 +183,7 @@ void update_notify(
 	uint8_t old_level, // The old/previous level
 	uint8_t new_level) // The new/current level
 {
+#ifdef DEBUG
 	LOG(F("update_notify("));
 	LOG(channel);
 	LOG(F(", "));
@@ -194,6 +195,7 @@ void update_notify(
 	LOG(F(", "));
 	LOG(new_level);
 	LOGln(F(")"));
+#endif
 	if (channel == cur_channel) // Display adjusted level
 		display_color(COLORS[data], new_level, range);
 }
@@ -367,11 +369,13 @@ void next_channel()
 
 void print_state(char event)
 {
+#if DEBUG
 	LOG(event);
 	LOG(F(" "));
 	LOG(cur_channel);
 	LOG(F(":"));
 	LOGln(ctrl.get(cur_channel));
+#endif
 }
 
 /*
@@ -385,7 +389,9 @@ bool go_to_sleep()
 	if (!ctrl.go_to_sleep()) // RCN network is busy
 		return false;
 
+#if DEBUG
 	LOGln(F("Going to sleep..."));
+#endif
 
 	// Change PCINT8..10 to trigger only on A2 (pushbutton).
 	PCMSK1 = B00000100; // - PCINT14 .. PCINT8
@@ -419,7 +425,9 @@ bool go_to_sleep()
 
 void wake_up()
 {
+#if DEBUG
 	LOGln(F("Waking up..."));
+#endif
 	ctrl.wake_up();
 
 	// Animate LEDs to signal wakeup
