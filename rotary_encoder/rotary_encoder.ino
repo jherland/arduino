@@ -97,6 +97,13 @@
  * License: GNU GPL v2 or later
  */
 
+// TODO: Display current color at full intensity while button is pressed.
+// TODO: Rotating while pressed should browse through channels.
+// TODO: Communicate range from host to controller
+// TODO: Dynamic discovery of channels
+// TODO: Dynamic discovery of multiple hosts
+// TODO: Packet radio collision robustness
+
 // #define DEBUG 1
 
 #if DEBUG
