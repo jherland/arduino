@@ -107,7 +107,7 @@
 #define LOGln(...)
 #endif
 
-#define RCN_CTRL_MAX_CHANNELS 3
+#define RCN_CTRL_MAX_CHANNELS 7
 
 #include <RF12.h> // Needed by RCN
 #include <Ports.h> // Needs Sleepy::*
@@ -133,10 +133,48 @@ bool button_debounce = 0;
 
 byte cur_channel = 0; // Index into above array
 
-const byte PWM_PINS[RCN_CTRL_MAX_CHANNELS] = {5, 6, 9};
+enum PWM_PINS { // Arduino PWM pins hooked up to RGB LED
+	PWM_RED = 5,
+	PWM_GREEN = 6,
+	PWM_BLUE = 9
+};
 
 unsigned long last_activity = 0;
 bool groggy = false; // Set to true, when we've just woken up from sleep
+
+struct color { uint8_t red, green, blue; };
+const struct color COLORS[RCN_CTRL_MAX_CHANNELS] = {
+	{0xff, 0xff, 0xff}, // white
+	{0xff, 0x00, 0x00}, // red
+	{0xff, 0x7f, 0x00}, // orange
+	{0xff, 0xff, 0x00}, // yellow
+	{0x00, 0xff, 0x00}, // green
+	{0x00, 0x00, 0xff}, // blue
+	{0x7f, 0x00, 0xff}  // violet
+};
+enum COLOR { WHITE, RED, ORANGE, YELLOW, GREEN, BLUE, VIOLET };
+
+void fade_pin(int pin, uint8_t value)
+{
+	if (value == 0)
+		digitalWrite(pin, HIGH);
+	else if (value == 0xff)
+		digitalWrite(pin, LOW);
+	else
+		analogWrite(pin, 0xff - value);
+}
+
+void display_color(
+	const struct color& c, uint8_t level, uint8_t range = 0xff)
+{
+	struct color result;
+	result.red = ((uint16_t) level * c.red) / range;
+	result.green = ((uint16_t) level * c.green) / range;
+	result.blue = ((uint16_t) level * c.blue) / range;
+	fade_pin(PWM_RED,   result.red);
+	fade_pin(PWM_GREEN, result.green);
+	fade_pin(PWM_BLUE,  result.blue);
+}
 
 void update_notify(
 	uint8_t channel, // The channel id
@@ -156,16 +194,8 @@ void update_notify(
 	LOG(F(", "));
 	LOG(new_level);
 	LOGln(F(")"));
-
-	if (channel == cur_channel) { // Display adjusted level
-		for (int i = 0; i < ARRAY_LENGTH(PWM_PINS); i++) {
-			if (PWM_PINS[i] == data)
-				analogWrite(PWM_PINS[i], 0xff - new_level);
-			else
-				analogWrite(PWM_PINS[i], 0xff);
-		}
-
-	}
+	if (channel == cur_channel) // Display adjusted level
+		display_color(COLORS[data], new_level, range);
 }
 
 RCN_Controller ctrl(RF12_868MHZ, 123, 16, update_notify);
@@ -210,11 +240,14 @@ void setup(void)
 
 	ctrl.init();
 
-	// Initialize one channel for each PWM pin.
-	for (int i = 0; i < ARRAY_LENGTH(PWM_PINS); i++) {
-		pinMode(PWM_PINS[i], OUTPUT);
-		ctrl.add_channel(0xff, 0, PWM_PINS[i]);
-	}
+	// Initialize PWM pins.
+	pinMode(PWM_RED,   OUTPUT);
+	pinMode(PWM_GREEN, OUTPUT);
+	pinMode(PWM_BLUE,  OUTPUT);
+	display_color(COLORS[WHITE], 0); // black
+
+	for (int i = 0; i < ARRAY_LENGTH(COLORS); i++)
+		ctrl.add_channel(0xff, 0, i);
 
 	// Request current channel level
 	ctrl.sync(cur_channel);
@@ -324,13 +357,11 @@ int process_inputs(void)
 
 void next_channel()
 {
-	// Stop displaying current channel
-	analogWrite(PWM_PINS[cur_channel], 0xff);
 	// Go to next channel
 	++cur_channel %= ctrl.num_channels();
 	// Display level of the new channel
-	analogWrite(PWM_PINS[cur_channel], 0xff - ctrl.get(cur_channel));
-	// Ask for a status update on the current channel
+	ctrl.adjust(cur_channel, 0);
+	// Ask for a status update on the new channel
 	ctrl.sync(cur_channel);
 }
 
@@ -363,15 +394,13 @@ bool go_to_sleep()
 	TIMSK2 &= ~1; // Clear TOIE2 to disable TOV2 interrupt
 
 	// Animate LEDs to signal power-down
-	for (int i = 0; i < 0xff; i += MIN(MAX(i / 10, 1), 0xff)) {
-		for (int j = 0; j < 3; j++)
-			analogWrite(PWM_PINS[j], i);
+	for (int i = 0xff; i > 0; i -= MAX(i / 10, 1)) {
+		display_color(COLORS[WHITE], i);
 		delay(5);
 	}
 
-	// Disable PWM outputs
-	for (int i = 0; i < ARRAY_LENGTH(PWM_PINS); i++)
-		digitalWrite(PWM_PINS[i], HIGH);
+	// Go black
+	display_color(COLORS[WHITE], 0);
 
 #if DEBUG
 	Serial.flush();
@@ -395,18 +424,15 @@ void wake_up()
 
 	// Animate LEDs to signal wakeup
 	for (int i = 0; i < 0xff; i += MIN(MAX(i / 10, 1), 0xff)) {
-		for (int j = 0; j < 3; j++)
-			analogWrite(PWM_PINS[j], 0xff - i);
+		display_color(COLORS[WHITE], i);
 		delay(5);
 	}
-	for (int j = 0; j < 3; j++)
-		digitalWrite(PWM_PINS[j], HIGH);
-
-	// Tell process_inputs() that we have just woken up
-	groggy = true;
 
 	// Re-enable PWM output
 	ctrl.adjust(cur_channel, 0);
+
+	// Tell process_inputs() that we have just woken up
+	groggy = true;
 
 	// Re-enable periodic timer interrupt
 	TIMSK2 |= 1; // Set TOIE2 to enable TOV2 interrupt
