@@ -5,3 +5,7 @@
 [submodule "remote_control_network"]
 	path = libraries/remote_control_network
 	url = git://github.com/jherland/remote_control_network.git
+
+[submodule "DHT_sensor_library"]
+	path = libraries/DHT_sensor_library
+	url = git://github.com/adafruit/DHT-sensor-library.git
