@@ -1,0 +1,65 @@
+Observations of the 433MHz Nexa communication
+=============================================
+
+The receiver is noisy. When there is no signal, the output from the
+receiver seems to be random noise. However, when a Nexa command is being
+transmitted, the signal seems "somewhat less noisy". There seems to be a
+fairly regular pulse train, often ending for a LOW state for up to ~100ms,
+before the signal reverts to noise.
+
+During a command sequence, the HIGH states are usually 300-400µs long,
+while the LOW states are either ~200µs, ~1200µs, ~2600µs, or 10000µs long.
+
+- A command sequence has at least 3 repetitions of the same command.
+- Each command starts with ~10.2ms LOW pulse
+- Each command is ~77-81ms long and consists of exactly 132 L/H pulses
+- Between repeated commands, corresponding pulses deviates less than 100µs
+  from their average.
+- Between repeated commands, the total command length deviates less than
+  60µs from the average.
+
+- All HIGH pulses are on average ~310µs long, within ~248µs to ~432µs.
+- All LOW pulses fall into one of the following categories (pulse lengths
+  are given as min / avg / max in µs):
+	A. 10080 / 10150 / 10208 (One per command, This is the first LOW
+				  pulse that introduces the command)
+	B.  2592 /  2643 /  2692 (One per command, This is the second LOW
+				  pulse in every command)
+	X.  1132 /  1236 /  1300 (There are 32 of these in every command)
+	Y.    44 /   215 /   284 (There are 32 of these in every command)
+
+The shorter LOW-pulses (X and Y) always appear in pairs (obviously with
+HIGH pulses in between), either X followed by Y, or Y followed by X.
+
+So we seem to have the following sync pattern introducing each command:
+                                           ____                  ____
+  ________________________________________|    |________________|    |
+                  ~10 150µs               ~310µs    ~2 643µs    ~310µs
+
+Or abbreviated to: A-H-B-H
+
+Furthermore we have two more waveform, combinations of which make up the
+rest of the command:
+         ____                  ____
+     ___|    |________________|    |
+ ~215µs ~310µs    ~1 236µs    ~310µs
+
+Abbreviated to: Y-H-X-H
+                      ____     ____
+     ________________|    |___|    |
+        ~1 236µs  ~310µs ~215µs ~310µs
+
+Abbreviated to: X-H-Y-H
+
+Let's assume these waveforms represents one data bit each, and let's
+arbitrarily call them the 0-bit and 1-bit, respectively.
+
+We can then summarize our findings as follows:
+- Each command starts with the following sync pattern: A-H-B-H
+- Then follows 32 data bits, each bit formatted as:
+	0: Y-H-X-H
+	1: X-H-Y-H
+- Each command is repeated at least thrice.
+
+From this, we can start constructing an algorithm for decoding the
+incoming signal into 32-bit command packets.
