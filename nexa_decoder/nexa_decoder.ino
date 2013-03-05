@@ -15,7 +15,7 @@
  *    1 2 3 4       5 6 7 8
  *
  * 1: GND
- * 2: Digital output (connect to PB4 (Arduino pin #12))
+ * 2: Digital output (connect to PB0 (Arduino pin #8))
  * 3. Linear output (maybe: pull-down resistor to remove noise from pin 2)
  * 4: VCC (5V)
  * 5: VCC
@@ -30,8 +30,8 @@
 #include <limits.h>
 
 // Adjust the following to match where the RF receiver is connected.
-#define RF_SETUP() bitClear(DDRB, 4)
-#define RF_READ()  bitRead(PINB, 4)
+#define RF_SETUP() bitClear(DDRB, 0)
+#define RF_READ()  bitRead(PINB, 0)
 
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
 
