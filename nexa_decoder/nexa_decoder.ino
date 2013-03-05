@@ -118,39 +118,51 @@ void detect_sync()
 		i = quantize_pulse(next_pulse()) == sync[i] ? i + 1 : 0;
 }
 
+/*
+ * Decode a data bit from the RF receiver.
+ *
+ * Return true if a data bit was successfully decoded and saved into bit,
+ * false if no data bit was decoded and the current transmission is not a
+ * valid command.
+ */
+bool read_data_bit(int& bit)
+{
+	/*
+	 * Decode Y-H-X-H into '0' and X-H-Y-H into '1'. Everything else
+	 * is invalid data.
+	 */
+	int first_pulse = quantize_pulse(next_pulse());
+	if (!(first_pulse == PULSE_X || first_pulse == PULSE_Y))
+		return false;
+	if (quantize_pulse(next_pulse()) != PULSE_H)
+		return false;
+	int second_pulse = quantize_pulse(next_pulse());
+	if (first_pulse + second_pulse != PULSE_X + PULSE_Y)
+		return false;
+	if (quantize_pulse(next_pulse()) != PULSE_H)
+		return false;
+	bit = first_pulse == PULSE_X;
+	return true;
+}
+
 void loop()
 {
-	const unsigned int BUF_SIZE = 1024;
+	const unsigned int BUF_SIZE = 40;
 	char buf[BUF_SIZE];
 	unsigned int i = 0;
 
 	detect_sync();
 	buf[i++] = '>';
-	while (i < BUF_SIZE - 1) {
-		int p = next_pulse();
-		switch (quantize_pulse(p)) {
-			case PULSE_A:
-				buf[i++] = 'A';
-				break;
-			case PULSE_B:
-				buf[i++] = 'B';
-				break;
-			case PULSE_X:
-				buf[i++] = 'X';
-				break;
-			case PULSE_Y:
-				buf[i++] = 'Y';
-				break;
-			case PULSE_H:
-				buf[i++] = 'H';
-				break;
-			default:
-				buf[i++] = '\0';
-				Serial.println(buf);
-				Serial.print(F("and then "));
-				Serial.println(p);
-				return;
+	for (i = 0; i < 32; i++) {
+		int b;
+		if (!read_data_bit(b)) { // failed to complete command
+			buf[i++] = '\0';
+			Serial.println(buf);
+			Serial.println(F("and then FAIL"));
+			Serial.flush();
+			return;
 		}
+		buf[i++] = b ? '1' : '0';
 	}
 	buf[i++] = '\0';
 	Serial.println(buf);
