@@ -44,9 +44,6 @@ enum PulseType {
 	PULSE_NO  // Not one of the others. An invalid pulse.
 };
 
-const unsigned int TIMINGS_LEN = 512;
-unsigned int timings[TIMINGS_LEN];
-
 void setup()
 {
 	RF_SETUP();
