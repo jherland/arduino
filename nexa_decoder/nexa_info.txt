@@ -63,3 +63,97 @@ We can then summarize our findings as follows:
 
 From this, we can start constructing an algorithm for decoding the
 incoming signal into 32-bit command packets.
+
+The above works well for most modern Nexa systems, however, the older Nexa
+wall switches with "manual code wheels" (marked A-O and 1-15, respectively)
+is not recognized by the above scheme. Back to the oscilloscope:
+- Pressing ON on unused wall switch WST-512 #1 (13/M):
+	- 10.9 ms LOW (= SYNC)
+	- 0.35ms HIGH -> 1.05ms LOW x 5 (= 0)
+	- 1.08ms HIGH -> 0.35ms LOW (= 1)
+	- 0.35ms HIGH -> 1.05ms LOW (= 0)
+	- ...
+	- Binary code: SYNC -> 0000010100000101000101010
+- Pressing OFF on unused wall switch WST-512 #1 (13/M):
+	- Binary code: SYNC -> 0000010100000101000101000
+- Pressing OFF on unused wall switch WST-512 #1 (1/M):
+	- Binary code: SYNC -> 0000010100000000000101000
+- Pressing ON on unused wall switch WST-512 #1 (1/M):
+	- Binary code: SYNC -> 0000010100000000000101010
+- Pressing ON on unused wall switch WST-512 #1 (2/M):
+	- Binary code: SYNC -> 0000010101000000000101010
+- Pressing ON on unused wall switch WST-512 #1 (4/M):
+	- Binary code: SYNC -> 0000010100010000000101010
+- Pressing ON on unused wall switch WST-512 #1 (4/M):
+	- Binary code: SYNC -> 0000010101010000000101010
+- Pressing ON on unused wall switch WST-512 #1 (5/M):
+	- Binary code: SYNC -> 0000010100000100000101010
+- Pressing ON on unused wall switch WST-512 #1 (15/M):
+	- Binary code: SYNC -> 0000010100010101000101010
+- Pressing ON on unused wall switch WST-512 #1 (16/M):
+	- Binary code: SYNC -> 0000010101010101000101010
+- Pressing ON on unused wall switch WST-512 #1 (1/A):
+	- Binary code: SYNC -> 0000000000000000000101010
+- Pressing ON on unused wall switch WST-512 #1 (1/P):
+	- Binary code: SYNC -> 0101010100000000000101010
+- Pressing ON on unused wall switch WST-512 #1 (1/O):
+	- Binary code: SYNC -> 0001010100000000000101010
+- Pressing ON on unused wall switch WST-512 #1 (1/B):
+	- Binary code: SYNC -> 0100000000000000000101010
+
+Combining the above observations with the explanation on
+http://svn.telldus.com/svn/rf_ctrl/nexa_2_6_driver/trunk/NexaProtocol.txt,
+we have the following:
+
+- The last '0' in the above bit sequences is actually the start of the
+  next SYNC.
+- A SYNC is a SHORT (.35 ms) HIGH followed by a VERY LONG (10.9ms) LOW.
+- A '0' data bit is a SHORT HIGH -> LONG (1.05ms) LOW -> SHORT HIGH ->
+  LONG LOW (i.e. a "00" from the above bit sequences)
+- A '1' data bit is a SHORT HIGH -> LONG LOW -> LONG HIGH -> SHORT LOW
+  (i.e. a "01" from the above bit sequence).
+- We then have, for unused wall switch WST-512 #1:
+	-  1/A/ON:  SYNC -> 000000000111
+	-  1/B/ON:  SYNC -> 100000000111
+	-  1/O/ON:  SYNC -> 011100000111
+	-  1/P/ON:  SYNC -> 111100000111
+	-  1/M/ON:  SYNC -> 001100000111
+	-  2/M/ON:  SYNC -> 001110000111
+	- 15/M/ON:  SYNC -> 001101110111
+	- 16/M/ON:  SYNC -> 001111110111
+	-  1/M/ON:  SYNC -> 001100000111
+	-  1/M/OFF: SYNC -> 001100000110
+- And for unused wall switch WST-512 #2:
+	-  1/A/OFF: SYNC -> 000000000110
+	-  1/A/ON:  SYNC -> 000000000111
+	- 16/P/ON:  SYNC -> 111111110111
+
+- Summary:
+	- This is a 12 bit code, LSB first, formatted as follows:
+	  AAAABBBBXXXC
+	- AAAA is the letter code selected on the transmitter
+          (A -> 0000, B -> 1000, ... O -> 0111, P -> 1111)
+	- BBBB is the number code selected on the transmitter
+          (1 -> 0000, 2 -> 1000, ... 15 -> 0111, 16 -> 1111)
+	- XXX is unknkown, but AFAICS always 011
+	- C indicates ON/OFF state, ON -> 1, OFF -> 0
+
+
+Now, trying to create an algorithm for parsing both pulse formats
+-----------------------------------------------------------------
+
+From the first pulse format (format A), we have the following pulse
+lengths:
+	- ~10150µs LOW (SYNC part 1/4)
+	-  ~2643µs LOW (SYNC part 3/4)
+	-  ~1236µs LOW (data bit part 1/4 ('1') or 3/4 ('0'))
+	-   ~215µs LOW (data bit part 1/4 ('0') or 3/4 ('1'))
+	-   ~310µs HIGH (all HIGH pulses are this long)
+
+From the second pulse format (format B), we have the following pulse
+lengths:
+	- ~10900µs LOW (SYNC part 2/2)
+	-  ~1050µs LOW (data bit part 2/4 and maybe 4/4 ('0'))
+	-   ~350µs LOW (data bit part 4/4 ('1'))
+	-  ~1050µs HIGH (data bit part 3/4 ('1'))
+	-   ~350µs HIGH (SYNC part 1/2, data bit part 1/4 and maybe 3/4 ('0'))
