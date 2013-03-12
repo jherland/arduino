@@ -29,11 +29,13 @@
 
 #include <limits.h>
 
+#define DEBUG 0
+
 // Adjust the following to match where the RF receiver is connected.
 #define RF_SETUP() bitClear(DDRB, 0)
 #define RF_READ()  bitRead(PINB, 0)
 
-const unsigned int BUF_SIZE = 1536;
+const size_t BUF_SIZE = 1280;
 char buf[BUF_SIZE];
 size_t i = 0;
 
@@ -44,6 +46,13 @@ enum {
 } cur_state = UNKNOWN, new_state;
 
 byte cur_bit = 0;
+
+struct code {
+	byte device[3]; // 24-bit (A) or 8-bit (B) device identifier
+	byte channel; // 4-bit intra-device channel identifier (= 0 for B)
+	bool group; // true iff the group bit is set (false for B)
+	bool state; // ON - true, OFF - false
+};
 
 void setup()
 {
@@ -97,7 +106,7 @@ int next_pulse()
  *
  * This is equivalent to floor(log2(v)) + 1.
  */
-unsigned int numbits(unsigned int v)
+unsigned int num_bits(unsigned int v)
 {
 	unsigned int ret = 0;
 	while (v) {
@@ -125,7 +134,7 @@ int quantize_pulse(int p)
 	int sign = (p > 0) ? 1 : -1;
 	p *= sign; // abs value
 	p >>= 9; // divide by 512
-	switch (numbits(p)) {
+	switch (num_bits(p)) {
 		case 0: // 0µs <= p < 512µs
 			return sign * 1;
 		case 1: // 512µs <= p < 1024µs
@@ -139,6 +148,102 @@ int quantize_pulse(int p)
 			return sign * 5;
 		default:
 			return 0;
+	}
+}
+
+const char *three_bytes_in_hex(byte s[3])
+{
+	static char buf[7]; // 6 hex digits + NUL
+	const char hex[] = "0123456789ABCDEF";
+	buf[0] = hex[(s[2] >> 4) & B1111];
+	buf[1] = hex[(s[2] >> 0) & B1111];
+	buf[2] = hex[(s[1] >> 4) & B1111];
+	buf[3] = hex[(s[1] >> 0) & B1111];
+	buf[4] = hex[(s[0] >> 4) & B1111];
+	buf[5] = hex[(s[0] >> 0) & B1111];
+	buf[6] = '\0';
+	return buf;
+}
+
+/*
+ * Transmit the given code on the serial port.
+ */
+void transmit_code(struct code *c)
+{
+	Serial.print(three_bytes_in_hex(c->device));
+	Serial.print(':');
+	Serial.print(c->group ? '1' : '0');
+	Serial.print(':');
+	Serial.print(c->channel, HEX);
+	Serial.print(':');
+	Serial.println(c->state ? '1' : '0');
+	Serial.flush();
+}
+
+/*
+ * Parse the given format/code into a struct code and transmit it.
+ */
+void parse_code(char format, uint32_t code)
+{
+	struct code c;
+	static const unsigned char bit_swapper[] = {
+		0, 8, 4, 12, 2, 10, 6, 14,
+		1, 9, 5, 13, 3, 11, 7, 15 };
+
+	if (format == 'A') { // 32 bits: DDDDDDDDDDDDDDDDDDDDDDDD10GSCCCC
+		c.device[0] = code >> 8;
+		c.device[1] = code >> 16;
+		c.device[2] = code >> 24;
+		c.channel = code & B1111;
+		c.group = code & B100000;
+		c.state = code & B10000;
+	}
+	else if (format == 'B') { // 12 bits: DDDDDDDD011S
+		c.device[0] = 0;
+		c.device[1] = 0;
+		c.device[2] = 0;
+		c.channel = 0;
+		c.group = 0;
+		c.state = code & 1;
+		byte d = code >> 4;
+		c.device[0] |= bit_swapper[((d >> 4) & B1111)] << 4;
+		c.device[0] |= bit_swapper[(d & B1111)];
+	}
+	transmit_code(&c);
+};
+
+/*
+ * Decode commands from buf[0..i], and transmit them over the serial port.
+ */
+void decode_buf()
+{
+	int state = -1; // Initial state - before SYNC
+	char format = 0; // 'A' or 'B'
+	uint32_t code = 0; // Must be large enough to hold largest code
+	for (size_t j = 0; j < i; j++) {
+		char b = buf[j];
+		if (state > 0) { // Expecting another data bit
+			if (b == '0' || b == '1')
+				code |= ((uint32_t)(b == '1' ? 1 : 0) << --state);
+			else
+				state = -1; // Revert to initial state
+		}
+
+		if (state == 0) { // Finished reading data bits
+			parse_code(format, code);
+			code = 0;
+			state = -1; // Look for next SYNC
+		}
+		else if (state == -1) { // Looking for SYNC
+			if (b == 'A') { // SYNC for format A
+				format = 'A';
+				state = 32; // Expect 32 data bits
+			}
+			else if (b == 'B') {// SYNC for format B
+				format = 'B';
+				state = 12; // Expect 12 data bits
+			}
+		}
 	}
 }
 
@@ -163,7 +268,6 @@ void loop()
 				new_state = DA3;
 			else if (cur_state == SX2 || cur_state == DB1) {
 				if (cur_state == SX2) { // cmd format B
-					buf[i++] = '\n';
 					buf[i++] = 'B';
 				}
 				new_state = DB2;
@@ -199,7 +303,6 @@ void loop()
 					new_state = SX2;
 					break;
 				case SX3:
-					buf[i++] = '\n';
 					buf[i++] = 'A';
 					new_state = DA0;
 					break;
@@ -221,23 +324,19 @@ void loop()
 			}
 			break;
 	}
-	if (i >= BUF_SIZE - 5) { // Prevent overflowing buf
-		buf[i++] = 'X';
+	if (i >= BUF_SIZE) // Prevent overflowing buf
 		new_state = UNKNOWN;
-	}
+
 	if (cur_state != UNKNOWN && new_state == UNKNOWN) { // => UNKNOWN
-		// Invalid data: Print buffer.
-		// ...but only if it has > 8 valid bits
-		if (i > 8 + 2) {
-			buf[i++] = '\0';
-			Serial.print(buf);
-			Serial.print('>');
-			Serial.print(cur_state);
-			Serial.print('|');
-			Serial.print(p);
-			Serial.print('<');
-			Serial.flush();
-		}
+#if DEBUG
+		buf[i] = '\0';
+		Serial.println(buf);
+		Serial.flush();
+#endif DEBUG
+		// Reached end of valid data: Decode and transmit buffer.
+		// ...but only if it longer than the shortest command
+		if (i > 1 + 12) // Format B: SYNC + 12 data bits
+			decode_buf();
 		i = 0; // Restart buffer
 	}
 	cur_state = new_state;
