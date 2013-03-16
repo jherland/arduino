@@ -94,9 +94,9 @@ int next_pulse()
 
 	int ret;
 	if (ret_state)
-		ret = (now - start > INT_MAX) ? INT_MAX : now - start;
+		ret = now - start > INT_MAX ? INT_MAX : now - start;
 	else
-		ret = (start - now < INT_MIN) ? INT_MIN : start - now;
+		ret = start - now < INT_MIN ? INT_MIN : start - now;
 	start = now;
 	return ret;
 }
@@ -151,16 +151,19 @@ int quantize_pulse(int p)
 	}
 }
 
+/*
+ * Return a 6-letter string containing the given 3 bytes in hex notation.
+ */
 const char *three_bytes_in_hex(byte s[3])
 {
 	static char buf[7]; // 6 hex digits + NUL
 	const char hex[] = "0123456789ABCDEF";
-	buf[0] = hex[(s[2] >> 4) & B1111];
-	buf[1] = hex[(s[2] >> 0) & B1111];
-	buf[2] = hex[(s[1] >> 4) & B1111];
-	buf[3] = hex[(s[1] >> 0) & B1111];
-	buf[4] = hex[(s[0] >> 4) & B1111];
-	buf[5] = hex[(s[0] >> 0) & B1111];
+	buf[0] = hex[s[2] >> 4 & B1111];
+	buf[1] = hex[s[2] >> 0 & B1111];
+	buf[2] = hex[s[1] >> 4 & B1111];
+	buf[3] = hex[s[1] >> 0 & B1111];
+	buf[4] = hex[s[0] >> 4 & B1111];
+	buf[5] = hex[s[0] >> 0 & B1111];
 	buf[6] = '\0';
 	return buf;
 }
@@ -186,6 +189,7 @@ void transmit_code(struct code *c)
 void parse_code(char format, uint32_t code)
 {
 	struct code c;
+	// Array for swapping nibbles (1234 -> 4321)
 	static const unsigned char bit_swapper[] = {
 		0, 8, 4, 12, 2, 10, 6, 14,
 		1, 9, 5, 13, 3, 11, 7, 15 };
@@ -206,8 +210,8 @@ void parse_code(char format, uint32_t code)
 		c.group = 0;
 		c.state = code & 1;
 		byte d = code >> 4;
-		c.device[0] |= bit_swapper[((d >> 4) & B1111)] << 4;
-		c.device[0] |= bit_swapper[(d & B1111)];
+		c.device[0] |= bit_swapper[d >> 4 & B1111] << 4;
+		c.device[0] |= bit_swapper[d & B1111];
 	}
 	transmit_code(&c);
 };
@@ -223,8 +227,10 @@ void decode_buf()
 	for (size_t j = 0; j < i; j++) {
 		char b = buf[j];
 		if (state > 0) { // Expecting another data bit
-			if (b == '0' || b == '1')
-				code |= ((uint32_t)(b == '1' ? 1 : 0) << --state);
+			if (b == '0' || b == '1') {
+				uint32_t v = b == '1' ? 1 : 0;
+				code |= (v << --state);
+			}
 			else
 				state = -1; // Revert to initial state
 		}
@@ -332,7 +338,7 @@ void loop()
 		buf[i] = '\0';
 		Serial.println(buf);
 		Serial.flush();
-#endif DEBUG
+#endif // DEBUG
 		// Reached end of valid data: Decode and transmit buffer.
 		// ...but only if it longer than the shortest command
 		if (i > 1 + 12) // Format B: SYNC + 12 data bits
