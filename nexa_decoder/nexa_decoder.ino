@@ -15,13 +15,25 @@
  *    1 2 3 4       5 6 7 8
  *
  * 1: GND
- * 2: Digital output (connect to PB0 (Arduino pin #8))
+ * 2: Digital output (connect to PC0 (Arduino pin A0))
  * 3. Linear output (maybe: pull-down resistor to remove noise from pin 2)
  * 4: VCC (5V)
  * 5: VCC
  * 6: GND
  * 7: GND
  * 8: Optional Antenna (10-15 cm wire, or 35 cm wire)
+ *
+ * Or:
+ *
+ *   -------------------
+ *  |  433 MHz RF Recv  |
+ *   -------------------
+ *              | | | |
+ *              1 2 3 4
+ *
+ * 1: VCC (5V)
+ * 2 & 3: Digital output (connect to PC0 (Arduino pin A0))
+ * 4: GND
  *
  * Author: Johan Herland <johan@herland.net>
  * License: GNU GPL v2 or later
@@ -31,13 +43,15 @@
 
 #define DEBUG 0
 
+#define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
+
 // Adjust the following to match where the RF receiver is connected.
-#define RF_SETUP() bitClear(DDRB, 0)
-#define RF_READ()  bitRead(PINB, 0)
+#define RF_SETUP() bitClear(DDRC, 0)
+#define RF_READ()  bitRead(PINC, 0)
 
 const size_t BUF_SIZE = 1280;
 char buf[BUF_SIZE];
-size_t i = 0;
+size_t buf_pos = 0;
 
 enum {
 	UNKNOWN, SX1, SX2, SX3,
@@ -47,7 +61,14 @@ enum {
 
 byte cur_bit = 0;
 
-struct code {
+enum nexa_cmd_version {
+	NEXA_INVAL = 0, // Unknown/invalid version
+	NEXA_12BIT = 1, // Old 12-bit command format: DDDDDDDD011S
+	NEXA_32BIT = 2  // New 32-bit command format: D{24}10GSCCCC
+};
+
+struct nexa_cmd {
+	enum nexa_cmd_version version; // Command version/format, One of enum nexa_cmd_version
 	byte device[3]; // 24-bit (A) or 8-bit (B) device identifier
 	byte channel; // 4-bit intra-device channel identifier (= 0 for B)
 	bool group; // true iff the group bit is set (false for B)
@@ -56,11 +77,6 @@ struct code {
 
 void setup()
 {
-	/*
-	 * TODO: Connect RF input to ICP1/PB0 (Arduino pin #8), and set up
-	 * an interrupt to be triggered and a timestamp recorded on every
-	 * pin change.
-	 */
 	RF_SETUP();
 	Serial.begin(115200);
 	Serial.println(F("nexa_decoder ready:"));
@@ -154,16 +170,16 @@ int quantize_pulse(int p)
 /*
  * Return a 6-letter string containing the given 3 bytes in hex notation.
  */
-const char *three_bytes_in_hex(byte s[3])
+const char *three_bytes_in_hex(const byte s[3])
 {
 	static char buf[7]; // 6 hex digits + NUL
 	const char hex[] = "0123456789ABCDEF";
-	buf[0] = hex[s[2] >> 4 & B1111];
-	buf[1] = hex[s[2] >> 0 & B1111];
+	buf[0] = hex[s[0] >> 4 & B1111];
+	buf[1] = hex[s[0] >> 0 & B1111];
 	buf[2] = hex[s[1] >> 4 & B1111];
 	buf[3] = hex[s[1] >> 0 & B1111];
-	buf[4] = hex[s[0] >> 4 & B1111];
-	buf[5] = hex[s[0] >> 0 & B1111];
+	buf[4] = hex[s[2] >> 4 & B1111];
+	buf[5] = hex[s[2] >> 0 & B1111];
 	buf[6] = '\0';
 	return buf;
 }
@@ -171,82 +187,108 @@ const char *three_bytes_in_hex(byte s[3])
 /*
  * Transmit the given code on the serial port.
  */
-void transmit_code(struct code *c)
+void print_cmd(const struct nexa_cmd & cmd)
 {
-	Serial.print(three_bytes_in_hex(c->device));
+	Serial.print(cmd.version, HEX);
 	Serial.print(':');
-	Serial.print(c->group ? '1' : '0');
+	Serial.print(three_bytes_in_hex(cmd.device));
 	Serial.print(':');
-	Serial.print(c->channel, HEX);
+	Serial.print(cmd.group ? '1' : '0');
 	Serial.print(':');
-	Serial.println(c->state ? '1' : '0');
+	Serial.print(cmd.channel, HEX);
+	Serial.print(':');
+	Serial.println(cmd.state ? '1' : '0');
 	Serial.flush();
 }
 
 /*
- * Parse the given format/code into a struct code and transmit it.
+ * Add the given bit into the given byte array at the given bit index.
+ *
+ * The bit index is LSB, so index 0 corresponds to the LSB of
+ * dst[dst_len - 1], index 7 corresponds to the MSB of dst[dst_len - 1],
+ * index 8 corresponds to the LSB of dst[dst_len - 2], and so on.
  */
-void parse_code(char format, uint32_t code)
+void add_bit(byte * dst, size_t dst_len, size_t bit_idx, int bit_val)
 {
-	struct code c;
-	// Array for swapping nibbles (1234 -> 4321)
-	static const unsigned char bit_swapper[] = {
-		0, 8, 4, 12, 2, 10, 6, 14,
-		1, 9, 5, 13, 3, 11, 7, 15 };
-
-	if (format == 'A') { // 32 bits: DDDDDDDDDDDDDDDDDDDDDDDD10GSCCCC
-		c.device[0] = code >> 8;
-		c.device[1] = code >> 16;
-		c.device[2] = code >> 24;
-		c.channel = code & B1111;
-		c.group = code & B100000;
-		c.state = code & B10000;
-	}
-	else if (format == 'B') { // 12 bits: DDDDDDDD011S
-		c.device[0] = 0;
-		c.device[1] = 0;
-		c.device[2] = 0;
-		c.channel = 0;
-		c.group = 0;
-		c.state = code & 1;
-		byte d = code >> 4;
-		c.device[0] |= bit_swapper[d >> 4 & B1111] << 4;
-		c.device[0] |= bit_swapper[d & B1111];
-	}
-	transmit_code(&c);
-};
+	// assert(bit_idx < 8 * dst_len);
+	size_t byte_idx = dst_len - (1 + bit_idx / 8);
+	byte bit_mask = 1 << (bit_idx % 8);
+	if (bit_val)
+		dst[byte_idx] |= bit_mask;
+	else
+		dst[byte_idx] &= ~bit_mask;
+}
 
 /*
- * Decode commands from buf[0..i], and transmit them over the serial port.
+ * Initialize the given old-style 12-bit nexa_cmd from the 12 bits at buf.
+ *
+ * The command bits are of the form: DDDDDDDD011S
+ */
+void parse_12bit_cmd(struct nexa_cmd & cmd, const char buf[12])
+{
+	cmd.version = NEXA_12BIT;
+	cmd.device[0] = 0;
+	cmd.device[1] = 0;
+	for (size_t i = 0; i < 8; ++i)
+		add_bit(cmd.device + 2, 1, i, buf[i] == '1');
+	cmd.channel = 0;
+	cmd.group = 0;
+	cmd.state = buf[11] == '1';
+}
+
+/*
+ * Initialize the given new-style 32-bit nexa_cmd from the 32 bits at buf.
+ *
+ * The command bits are of the form: DDDDDDDDDDDDDDDDDDDDDDDD10GSCCCC
+ */
+void parse_32bit_cmd(struct nexa_cmd & cmd, const char buf[32])
+{
+	size_t i;
+	cmd.version = NEXA_32BIT;
+	for (i = 0; i < 24; ++i)
+		add_bit(cmd.device, ARRAY_LENGTH(cmd.device), i,
+			buf[i] == '1');
+	cmd.channel = (buf[28] == '1' ? B1000 : 0) |
+	              (buf[29] == '1' ? B100 : 0) |
+	              (buf[30] == '1' ? B10 : 0) |
+	              (buf[31] == '1' ? B1 : 0);
+	cmd.group = buf[26] == '1';
+	cmd.state = buf[27] == '1';
+}
+
+/*
+ * Parse data in buf[0..buf_pos] into nexa_cmds sent over the serial port.
  */
 void decode_buf()
 {
 	int state = -1; // Initial state - before SYNC
-	char format = 0; // 'A' or 'B'
-	uint32_t code = 0; // Must be large enough to hold largest code
-	for (size_t j = 0; j < i; j++) {
-		char b = buf[j];
+	enum nexa_cmd_version version = NEXA_INVAL;
+	for (size_t i = 0; i < buf_pos; i++) {
+		char b = buf[i];
 		if (state > 0) { // Expecting another data bit
-			if (b == '0' || b == '1') {
-				uint32_t v = b == '1' ? 1 : 0;
-				code |= (v << --state);
-			}
+			if (b == '0' || b == '1')
+				--state;
 			else
 				state = -1; // Revert to initial state
 		}
 
 		if (state == 0) { // Finished reading data bits
-			parse_code(format, code);
-			code = 0;
+			struct nexa_cmd cmd;
+			if (version == NEXA_12BIT)
+				parse_12bit_cmd(cmd, buf + i + 1 - 12);
+			else if (version == NEXA_32BIT)
+				parse_32bit_cmd(cmd, buf + i + 1 - 32);
+			print_cmd(cmd);
+
 			state = -1; // Look for next SYNC
 		}
 		else if (state == -1) { // Looking for SYNC
 			if (b == 'A') { // SYNC for format A
-				format = 'A';
+				version = NEXA_32BIT;
 				state = 32; // Expect 32 data bits
 			}
-			else if (b == 'B') {// SYNC for format B
-				format = 'B';
+			else if (b == 'B') { // SYNC for format B
+				version = NEXA_12BIT;
 				state = 12; // Expect 12 data bits
 			}
 		}
@@ -273,13 +315,12 @@ void loop()
 			else if (cur_state == DA2 && cur_bit == '0')
 				new_state = DA3;
 			else if (cur_state == SX2 || cur_state == DB1) {
-				if (cur_state == SX2) { // cmd format B
-					buf[i++] = 'B';
-				}
+				if (cur_state == SX2) // cmd format B
+					buf[buf_pos++] = 'B';
 				new_state = DB2;
 			}
 			else if (cur_state == DB3 && cur_bit == '0') {
-				buf[i++] = cur_bit;
+				buf[buf_pos++] = cur_bit;
 				cur_bit = 0;
 				new_state = DB0;
 			}
@@ -292,7 +333,7 @@ void loop()
 			else if (cur_state == DA2 && cur_bit == '1')
 				new_state = DA3;
 			else if (cur_state == DB3 && cur_bit == '1') {
-				buf[i++] = cur_bit;
+				buf[buf_pos++] = cur_bit;
 				cur_bit = 0;
 				new_state = DB0;
 			}
@@ -309,14 +350,14 @@ void loop()
 					new_state = SX2;
 					break;
 				case SX3:
-					buf[i++] = 'A';
+					buf[buf_pos++] = 'A';
 					new_state = DA0;
 					break;
 				case DA1:
 					new_state = DA2;
 					break;
 				case DA3:
-					buf[i++] = cur_bit;
+					buf[buf_pos++] = cur_bit;
 					cur_bit = 0;
 					new_state = DA0;
 					break;
@@ -330,20 +371,21 @@ void loop()
 			}
 			break;
 	}
-	if (i >= BUF_SIZE) // Prevent overflowing buf
+	if (buf_pos >= BUF_SIZE) // Prevent overflowing buf
 		new_state = UNKNOWN;
 
 	if (cur_state != UNKNOWN && new_state == UNKNOWN) { // => UNKNOWN
 #if DEBUG
-		buf[i] = '\0';
+		buf[buf_pos] = '\0';
 		Serial.println(buf);
 		Serial.flush();
 #endif // DEBUG
-		// Reached end of valid data: Decode and transmit buffer.
-		// ...but only if it longer than the shortest command
-		if (i > 1 + 12) // Format B: SYNC + 12 data bits
+		// Reached end of valid data: Decode and print buffer.
+		// ...but only if it is longer than the shortest command
+		// (Format B: SYNC + 12 data bits)
+		if (buf_pos > 1 + 12)
 			decode_buf();
-		i = 0; // Restart buffer
+		buf_pos = 0; // Restart buffer
 	}
 	cur_state = new_state;
 }
