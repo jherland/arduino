@@ -9,3 +9,7 @@
 [submodule "DHT_sensor_library"]
 	path = libraries/DHT_sensor_library
 	url = git://github.com/adafruit/DHT-sensor-library.git
+
+[submodule "nexa_node"]
+	path = libraries/nexa_node
+	url = git://github.com/jherland/nexa_node.git

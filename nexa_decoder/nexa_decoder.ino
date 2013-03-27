@@ -39,6 +39,9 @@
  * License: GNU GPL v2 or later
  */
 
+#include <RF433Transceiver.h>
+#include <NexaCommand.h>
+
 #include <limits.h>
 
 #define DEBUG 0
@@ -46,8 +49,7 @@
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
 
 // Adjust the following to match where the RF receiver is connected.
-#define RF_SETUP() bitClear(DDRC, 0)
-#define RF_READ()  bitRead(PINC, 0)
+RF433Transceiver rf_port(1);
 
 const size_t BUF_SIZE = 1280;
 char buf[BUF_SIZE];
@@ -61,23 +63,8 @@ enum {
 
 byte cur_bit = 0;
 
-enum nexa_cmd_version {
-	NEXA_INVAL = 0, // Unknown/invalid version
-	NEXA_12BIT = 1, // Old 12-bit command format: DDDDDDDD011S
-	NEXA_32BIT = 2  // New 32-bit command format: D{24}10GSCCCC
-};
-
-struct nexa_cmd {
-	enum nexa_cmd_version version; // Command version/format, One of enum nexa_cmd_version
-	byte device[3]; // 24-bit (A) or 8-bit (B) device identifier
-	byte channel; // 4-bit intra-device channel identifier (= 0 for B)
-	bool group; // true iff the group bit is set (false for B)
-	bool state; // ON - true, OFF - false
-};
-
 void setup()
 {
-	RF_SETUP();
 	Serial.begin(115200);
 	Serial.println(F("nexa_decoder ready:"));
 }
@@ -85,9 +72,9 @@ void setup()
 /*
  * Read the next pulse from the RF receiver and return it.
  *
- * This will block until RF_READ() changes. At that point it will return
- * an int whose absolute value is the pulse length in µs, and the sign
- * is positive for a HIGH pulse and negative for a LOW pulse.
+ * This will block until the RF input bit changes. At that point it will
+ * return an int whose absolute value is the pulse length in µs, and the
+ * sign is positive for a HIGH pulse and negative for a LOW pulse.
  *
  * This function must be called more often than the shortest pulse to be
  * detected.
@@ -100,13 +87,13 @@ void setup()
 int next_pulse()
 {
 	static unsigned long start = 0;
-	static int state = false;
+	static bool state = false;
 
-	while (state == RF_READ())
+	while (state == rf_port.rx_pin())
 		; // spin until state changes
 	unsigned long now = micros();
 	bool ret_state = state;
-	state = RF_READ();
+	state = rf_port.rx_pin();
 
 	int ret;
 	if (ret_state)
@@ -168,40 +155,6 @@ int quantize_pulse(int p)
 }
 
 /*
- * Return a 6-letter string containing the given 3 bytes in hex notation.
- */
-const char *three_bytes_in_hex(const byte s[3])
-{
-	static char buf[7]; // 6 hex digits + NUL
-	const char hex[] = "0123456789ABCDEF";
-	buf[0] = hex[s[0] >> 4 & B1111];
-	buf[1] = hex[s[0] >> 0 & B1111];
-	buf[2] = hex[s[1] >> 4 & B1111];
-	buf[3] = hex[s[1] >> 0 & B1111];
-	buf[4] = hex[s[2] >> 4 & B1111];
-	buf[5] = hex[s[2] >> 0 & B1111];
-	buf[6] = '\0';
-	return buf;
-}
-
-/*
- * Transmit the given code on the serial port.
- */
-void print_cmd(const struct nexa_cmd & cmd)
-{
-	Serial.print(cmd.version, HEX);
-	Serial.print(':');
-	Serial.print(three_bytes_in_hex(cmd.device));
-	Serial.print(':');
-	Serial.print(cmd.group ? '1' : '0');
-	Serial.print(':');
-	Serial.print(cmd.channel, HEX);
-	Serial.print(':');
-	Serial.println(cmd.state ? '1' : '0');
-	Serial.flush();
-}
-
-/*
  * Add the given bit into the given byte array at the given bit index.
  *
  * The bit index is LSB, so index 0 corresponds to the LSB of
@@ -220,13 +173,13 @@ void add_bit(byte * dst, size_t dst_len, size_t bit_idx, int bit_val)
 }
 
 /*
- * Initialize the given old-style 12-bit nexa_cmd from the 12 bits at buf.
+ * Initialize the given old-style NexaCommand from the 12 bits at buf.
  *
  * The command bits are of the form: DDDDDDDD011S
  */
-void parse_12bit_cmd(struct nexa_cmd & cmd, const char buf[12])
+void parse_12bit_cmd(NexaCommand & cmd, const char buf[12])
 {
-	cmd.version = NEXA_12BIT;
+	cmd.version = NexaCommand::NEXA_12BIT;
 	cmd.device[0] = 0;
 	cmd.device[1] = 0;
 	for (size_t i = 0; i < 8; ++i)
@@ -237,14 +190,14 @@ void parse_12bit_cmd(struct nexa_cmd & cmd, const char buf[12])
 }
 
 /*
- * Initialize the given new-style 32-bit nexa_cmd from the 32 bits at buf.
+ * Initialize the given new-style NexaCommandfrom the 32 bits at buf.
  *
  * The command bits are of the form: DDDDDDDDDDDDDDDDDDDDDDDD10GSCCCC
  */
-void parse_32bit_cmd(struct nexa_cmd & cmd, const char buf[32])
+void parse_32bit_cmd(NexaCommand & cmd, const char buf[32])
 {
 	size_t i;
-	cmd.version = NEXA_32BIT;
+	cmd.version = NexaCommand::NEXA_32BIT;
 	for (i = 0; i < 24; ++i)
 		add_bit(cmd.device, ARRAY_LENGTH(cmd.device), i,
 			buf[i] == '1');
@@ -257,12 +210,12 @@ void parse_32bit_cmd(struct nexa_cmd & cmd, const char buf[32])
 }
 
 /*
- * Parse data in buf[0..buf_pos] into nexa_cmds sent over the serial port.
+ * Parse data in buf[0..buf_pos] into NexaCommands sent over the serial port.
  */
 void decode_buf()
 {
 	int state = -1; // Initial state - before SYNC
-	enum nexa_cmd_version version = NEXA_INVAL;
+	NexaCommand::Version version = NexaCommand::NEXA_INVAL;
 	for (size_t i = 0; i < buf_pos; i++) {
 		char b = buf[i];
 		if (state > 0) { // Expecting another data bit
@@ -273,32 +226,33 @@ void decode_buf()
 		}
 
 		if (state == 0) { // Finished reading data bits
-			struct nexa_cmd cmd;
-			if (version == NEXA_12BIT)
+			NexaCommand cmd;
+			if (version == NexaCommand::NEXA_12BIT)
 				parse_12bit_cmd(cmd, buf + i + 1 - 12);
-			else if (version == NEXA_32BIT)
+			else if (version == NexaCommand::NEXA_32BIT)
 				parse_32bit_cmd(cmd, buf + i + 1 - 32);
-			print_cmd(cmd);
+			cmd.print(Serial);
+			Serial.flush();
 
 			state = -1; // Look for next SYNC
 		}
 		else if (state == -1) { // Looking for SYNC
 			if (b == 'A') { // SYNC for format A
-				version = NEXA_32BIT;
+				version = NexaCommand::NEXA_32BIT;
 				state = 32; // Expect 32 data bits
 			}
 			else if (b == 'B') { // SYNC for format B
-				version = NEXA_12BIT;
+				version = NexaCommand::NEXA_12BIT;
 				state = 12; // Expect 12 data bits
 			}
 		}
 	}
 }
 
-void loop()
+void handle_rf_pulse(int pulse)
 {
 	new_state = UNKNOWN;
-	int p = quantize_pulse(next_pulse()); // current pulse
+	int p = quantize_pulse(pulse); // current pulse
 	switch (p) {
 		case -5: // LOW: 8192µs <= pulse < 16384µs
 			new_state = SX1;
@@ -379,7 +333,7 @@ void loop()
 		buf[buf_pos] = '\0';
 		Serial.println(buf);
 		Serial.flush();
-#endif // DEBUG
+#endif
 		// Reached end of valid data: Decode and print buffer.
 		// ...but only if it is longer than the shortest command
 		// (Format B: SYNC + 12 data bits)
@@ -388,4 +342,9 @@ void loop()
 		buf_pos = 0; // Restart buffer
 	}
 	cur_state = new_state;
+}
+
+void loop()
+{
+	handle_rf_pulse(next_pulse());
 }
