@@ -42,57 +42,18 @@
 #include <Macros.h>
 #include <RF433Transceiver.h>
 #include <RingBuffer.h>
+#include <PulseParser.h>
 #include <NexaCommand.h>
 
 // Adjust the following to match where the RF receiver is connected.
 RF433Transceiver rf_port(1);
 RingBuffer<char> rx_bits(1000);
-
-enum {
-	UNKNOWN, SX1, SX2, SX3,
-	DA0, DA1, DA2, DA3,
-	DB0, DB1, DB2, DB3,
-} cur_state = UNKNOWN, new_state;
-
-byte cur_bit = 0;
+PulseParser pulse_parser(rx_bits);
 
 void setup()
 {
 	Serial.begin(115200);
 	Serial.println(F("nexa_decoder ready:"));
-}
-
-/*
- * Classify the given pulse length into the following categories:
- *
- * 0: Invalid pulse length (i.e. not within any of the below categories)
- * 1:    0µs <= p <   512µs
- * 2:  512µs <= p <  2048µs
- * 3: 2048µs <= p <  4096µs
- * 4: 4096µs <= p <  8192µs
- * 5: 8192µs <= p < 16384µs
- *
- * The above categories (1..5) are positive (1..5) for HIGH pulses, and
- * negative (-1..-5) for LOW pulses.
- */
-int quantize_pulse(int p)
-{
-	ASSERT(p >= -INT_MAX);
-	int sign = (p > 0) ? 1 : -1;
-	p = (p * sign) >> 9; // Divide pulse length (abs value) by 512
-	// there are 7 bits left in p representing the pulse length as a
-	// multiple of 512µs; map those into the above categories:
-	ASSERT(p <= B01111111);
-	static const uint8_t m[128] = {
-		1, // 0µs <= p < 512µs
-		2, 2, 2, // 512µs <= p < 2048µs
-		3, 3, 3, 3, // 2048µs <= p < 4096µs
-		4, 4, 4, 4, 4, 4, 4, 4, // 4096µs <= p < 8192µs
-		5, 5, 5, 5, 5, 5, 5, 5,
-		5, 5, 5, 5, 5, 5, 5, 5, // 8192µs <= p < 16384µs
-		// auto-initialized to 0 // 16384µs <= p
-	};
-	return m[p] * sign;
 }
 
 /*
@@ -191,97 +152,9 @@ void decode_bits(RingBuffer<char> & rx_bits)
 	}
 }
 
-/*
- * Handle the next RF pulse, drive the state machine, and generate new
- * bits in the ring buffer. Return true if we're currently "between"
- * Nexa commands.
- */
-bool handle_rf_pulse(int pulse)
-{
-	new_state = UNKNOWN;
-	int p = quantize_pulse(pulse); // current pulse
-	switch (p) {
-		case -5: // LOW: 8192µs <= pulse < 16384µs
-			new_state = SX1;
-			break;
-		case -3: // LOW: 2048µs <= pulse < 4096µs
-			if (cur_state == SX2) // cmd format A
-				new_state = SX3;
-			break;
-		case -2: // LOW: 512µs <= pulse < 2048µs
-			if (cur_state == DA0) {
-				cur_bit = '1';
-				new_state = DA1;
-			}
-			else if (cur_state == DA2 && cur_bit == '0')
-				new_state = DA3;
-			else if (cur_state == SX2 || cur_state == DB1) {
-				if (cur_state == SX2) // cmd format B
-					rx_bits.w_push('B');
-				new_state = DB2;
-			}
-			else if (cur_state == DB3 && cur_bit == '0') {
-				rx_bits.w_push(cur_bit);
-				cur_bit = 0;
-				new_state = DB0;
-			}
-			break;
-		case -1: // LOW: 0µs <= pulse < 512µs
-			if (cur_state == DA0) {
-				cur_bit = '0';
-				new_state = DA1;
-			}
-			else if (cur_state == DA2 && cur_bit == '1')
-				new_state = DA3;
-			else if (cur_state == DB3 && cur_bit == '1') {
-				rx_bits.w_push(cur_bit);
-				cur_bit = 0;
-				new_state = DB0;
-			}
-			break;
-		case 2: // HIGH: 512µs <= pulse < 2048µs
-			if (cur_state == DB2) {
-				cur_bit = '1';
-				new_state = DB3;
-			}
-			break;
-		case 1: // HIGH: 0µs <= pulse < 512µs
-			switch (cur_state) {
-				case SX1:
-					new_state = SX2;
-					break;
-				case SX3:
-					rx_bits.w_push('A');
-					new_state = DA0;
-					break;
-				case DA1:
-					new_state = DA2;
-					break;
-				case DA3:
-					rx_bits.w_push(cur_bit);
-					cur_bit = 0;
-					new_state = DA0;
-					break;
-				case DB0:
-					new_state = DB1;
-					break;
-				case DB2:
-					cur_bit = '0';
-					new_state = DB3;
-					break;
-			}
-			break;
-	}
-	bool ret = false;
-	if (cur_state != UNKNOWN && new_state == UNKNOWN) // => UNKNOWN
-		ret = true;
-	cur_state = new_state;
-	return ret;
-}
-
 void loop()
 {
-	if (handle_rf_pulse(rf_port.rx_get_pulse()) &&
+	if (pulse_parser(rf_port.rx_get_pulse()) &&
 	    !rx_bits.r_empty()) {
 		size_t len = rx_bits.r_buf_len();
 		do {
