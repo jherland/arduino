@@ -41,14 +41,12 @@
 
 #include <Macros.h>
 #include <RF433Transceiver.h>
+#include <RingBuffer.h>
 #include <NexaCommand.h>
 
 // Adjust the following to match where the RF receiver is connected.
 RF433Transceiver rf_port(1);
-
-const size_t BUF_SIZE = 1280;
-char buf[BUF_SIZE];
-size_t buf_pos = 0;
+RingBuffer<char> rx_bits(1000);
 
 enum {
 	UNKNOWN, SX1, SX2, SX3,
@@ -153,46 +151,52 @@ void parse_32bit_cmd(NexaCommand & cmd, const char buf[32])
 }
 
 /*
- * Parse data in buf[0..buf_len] into NexaCommands sent over the serial port.
+ * Parse data form ring buffer, and generate + print NexaCommands.
  */
-void decode_buf(const char * buf, size_t buf_len)
+void decode_bits(RingBuffer<char> & rx_bits)
 {
-	int state = -1; // Initial state - before SYNC
-	NexaCommand::Version version = NexaCommand::NEXA_INVAL;
-	for (size_t i = 0; i < buf_len; i++) {
-		char b = buf[i];
-		if (state > 0) { // Expecting another data bit
-			if (b == '0' || b == '1')
-				--state;
-			else
-				state = -1; // Revert to initial state
+	static NexaCommand::Version version = NexaCommand::NEXA_INVAL;
+	static char buf[32]; // Long enough for the longest command
+	static size_t buf_pos = 0;
+	static size_t expect = 0;
+	while (!rx_bits.r_empty()) {
+		char b = rx_bits.r_pop();
+		if (b == 'A' || b == 'B') {
+			buf_pos = 0;
+			if (b == 'A') {
+				version = NexaCommand::NEXA_32BIT;
+				expect = 32;
+			}
+			else {
+				version = NexaCommand::NEXA_12BIT;
+				expect = 12;
+			}
 		}
+		else if ((b == '0' || b == '1') && buf_pos < expect)
+			buf[buf_pos++] = b;
 
-		if (state == 0) { // Finished reading data bits
+		if (expect && buf_pos == expect) { // all bits present
 			NexaCommand cmd;
 			if (version == NexaCommand::NEXA_12BIT)
-				parse_12bit_cmd(cmd, buf + i + 1 - 12);
+				parse_12bit_cmd(cmd, buf);
 			else if (version == NexaCommand::NEXA_32BIT)
-				parse_32bit_cmd(cmd, buf + i + 1 - 32);
+				parse_32bit_cmd(cmd, buf);
 			cmd.print(Serial);
 			Serial.flush();
 
-			state = -1; // Look for next SYNC
-		}
-		else if (state == -1) { // Looking for SYNC
-			if (b == 'A') { // SYNC for format A
-				version = NexaCommand::NEXA_32BIT;
-				state = 32; // Expect 32 data bits
-			}
-			else if (b == 'B') { // SYNC for format B
-				version = NexaCommand::NEXA_12BIT;
-				state = 12; // Expect 12 data bits
-			}
+			expect = 0;
+			buf_pos = 0;
+			version = NexaCommand::NEXA_INVAL;
 		}
 	}
 }
 
-void handle_rf_pulse(int pulse)
+/*
+ * Handle the next RF pulse, drive the state machine, and generate new
+ * bits in the ring buffer. Return true if we're currently "between"
+ * Nexa commands.
+ */
+bool handle_rf_pulse(int pulse)
 {
 	new_state = UNKNOWN;
 	int p = quantize_pulse(pulse); // current pulse
@@ -213,11 +217,11 @@ void handle_rf_pulse(int pulse)
 				new_state = DA3;
 			else if (cur_state == SX2 || cur_state == DB1) {
 				if (cur_state == SX2) // cmd format B
-					buf[buf_pos++] = 'B';
+					rx_bits.w_push('B');
 				new_state = DB2;
 			}
 			else if (cur_state == DB3 && cur_bit == '0') {
-				buf[buf_pos++] = cur_bit;
+				rx_bits.w_push(cur_bit);
 				cur_bit = 0;
 				new_state = DB0;
 			}
@@ -230,7 +234,7 @@ void handle_rf_pulse(int pulse)
 			else if (cur_state == DA2 && cur_bit == '1')
 				new_state = DA3;
 			else if (cur_state == DB3 && cur_bit == '1') {
-				buf[buf_pos++] = cur_bit;
+				rx_bits.w_push(cur_bit);
 				cur_bit = 0;
 				new_state = DB0;
 			}
@@ -247,14 +251,14 @@ void handle_rf_pulse(int pulse)
 					new_state = SX2;
 					break;
 				case SX3:
-					buf[buf_pos++] = 'A';
+					rx_bits.w_push('A');
 					new_state = DA0;
 					break;
 				case DA1:
 					new_state = DA2;
 					break;
 				case DA3:
-					buf[buf_pos++] = cur_bit;
+					rx_bits.w_push(cur_bit);
 					cur_bit = 0;
 					new_state = DA0;
 					break;
@@ -268,26 +272,24 @@ void handle_rf_pulse(int pulse)
 			}
 			break;
 	}
-	if (buf_pos >= BUF_SIZE) // Prevent overflowing buf
-		new_state = UNKNOWN;
-
-	if (cur_state != UNKNOWN && new_state == UNKNOWN) { // => UNKNOWN
-#if DEBUG
-		buf[buf_pos] = '\0';
-		Serial.println(buf);
-		Serial.flush();
-#endif
-		// Reached end of valid data: Decode and print buffer.
-		// ...but only if it is longer than the shortest command
-		// (Format B: SYNC + 12 data bits)
-		if (buf_pos > 1 + 12)
-			decode_buf(buf, buf_pos);
-		buf_pos = 0; // Restart buffer
-	}
+	bool ret = false;
+	if (cur_state != UNKNOWN && new_state == UNKNOWN) // => UNKNOWN
+		ret = true;
 	cur_state = new_state;
+	return ret;
 }
 
 void loop()
 {
-	handle_rf_pulse(rf_port.rx_get_pulse());
+	if (handle_rf_pulse(rf_port.rx_get_pulse()) &&
+	    !rx_bits.r_empty()) {
+		size_t len = rx_bits.r_buf_len();
+		do {
+#if DEBUG
+			Serial.write((const byte *) rx_bits.r_buf(), len);
+			Serial.println();
+#endif
+			decode_bits(rx_bits);
+		} while (len = rx_bits.r_buf_len());
+	}
 }
