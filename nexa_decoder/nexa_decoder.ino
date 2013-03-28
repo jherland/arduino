@@ -42,8 +42,6 @@
 #include <RF433Transceiver.h>
 #include <NexaCommand.h>
 
-#include <limits.h>
-
 #define DEBUG 0
 
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
@@ -67,41 +65,6 @@ void setup()
 {
 	Serial.begin(115200);
 	Serial.println(F("nexa_decoder ready:"));
-}
-
-/*
- * Read the next pulse from the RF receiver and return it.
- *
- * This will block until the RF input bit changes. At that point it will
- * return an int whose absolute value is the pulse length in µs, and the
- * sign is positive for a HIGH pulse and negative for a LOW pulse.
- *
- * This function must be called more often than the shortest pulse to be
- * detected.
- *
- * This function assumes that the longest pulse of interest is shorter
- * than INT_MAX µs. If the measured pulse length is longer, the returned
- * value will be pinned at INT_MAX or INT_MIN (for a HIGH and LOW pulse,
- * respectively).
- */
-int next_pulse()
-{
-	static unsigned long start = 0;
-	static bool state = false;
-
-	while (state == rf_port.rx_pin())
-		; // spin until state changes
-	unsigned long now = micros();
-	bool ret_state = state;
-	state = rf_port.rx_pin();
-
-	int ret;
-	if (ret_state)
-		ret = now - start > INT_MAX ? INT_MAX : now - start;
-	else
-		ret = start - now < INT_MIN ? INT_MIN : start - now;
-	start = now;
-	return ret;
 }
 
 /*
@@ -210,13 +173,13 @@ void parse_32bit_cmd(NexaCommand & cmd, const char buf[32])
 }
 
 /*
- * Parse data in buf[0..buf_pos] into NexaCommands sent over the serial port.
+ * Parse data in buf[0..buf_len] into NexaCommands sent over the serial port.
  */
-void decode_buf()
+void decode_buf(const char * buf, size_t buf_len)
 {
 	int state = -1; // Initial state - before SYNC
 	NexaCommand::Version version = NexaCommand::NEXA_INVAL;
-	for (size_t i = 0; i < buf_pos; i++) {
+	for (size_t i = 0; i < buf_len; i++) {
 		char b = buf[i];
 		if (state > 0) { // Expecting another data bit
 			if (b == '0' || b == '1')
@@ -338,7 +301,7 @@ void handle_rf_pulse(int pulse)
 		// ...but only if it is longer than the shortest command
 		// (Format B: SYNC + 12 data bits)
 		if (buf_pos > 1 + 12)
-			decode_buf();
+			decode_buf(buf, buf_pos);
 		buf_pos = 0; // Restart buffer
 	}
 	cur_state = new_state;
@@ -346,5 +309,5 @@ void handle_rf_pulse(int pulse)
 
 void loop()
 {
-	handle_rf_pulse(next_pulse());
+	handle_rf_pulse(rf_port.rx_get_pulse());
 }
