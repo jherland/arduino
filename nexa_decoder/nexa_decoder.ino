@@ -44,6 +44,24 @@
 
 #define DEBUG 0
 
+#if DEBUG
+#define ASSERT(expr) do { \
+	if (!(expr)) { \
+		Serial.print(__FILE__); \
+		Serial.print(F(":")); \
+		Serial.print(__LINE__); \
+		Serial.print(F(" in '")); \
+		Serial.print(__PRETTY_FUNCTION__); \
+		Serial.print(F("': Assertion failed: ")); \
+		Serial.println(#expr); \
+		Serial.flush(); \
+		abort(); \
+	} \
+} while (0)
+#else
+#define ASSERT(expr, msg)
+#endif
+
 #define ARRAY_LENGTH(a) ((sizeof (a)) / (sizeof (a)[0]))
 
 // Adjust the following to match where the RF receiver is connected.
