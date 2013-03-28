@@ -86,21 +86,6 @@ void setup()
 }
 
 /*
- * Return number of bits needed to represent the given number.
- *
- * This is equivalent to floor(log2(v)) + 1.
- */
-unsigned int num_bits(unsigned int v)
-{
-	unsigned int ret = 0;
-	while (v) {
-		v >>= 1;
-		ret++;
-	}
-	return ret;
-}
-
-/*
  * Classify the given pulse length into the following categories:
  *
  * 0: Invalid pulse length (i.e. not within any of the below categories)
@@ -115,24 +100,22 @@ unsigned int num_bits(unsigned int v)
  */
 int quantize_pulse(int p)
 {
+	ASSERT(p >= -INT_MAX);
 	int sign = (p > 0) ? 1 : -1;
-	p *= sign; // abs value
-	p >>= 9; // divide by 512
-	switch (num_bits(p)) {
-		case 0: // 0µs <= p < 512µs
-			return sign * 1;
-		case 1: // 512µs <= p < 1024µs
-		case 2: // 1024µs <= p < 2048µs
-			return sign * 2;
-		case 3: // 2048µs <= p < 4096µs
-			return sign * 3;
-		case 4: // 4096µs <= p < 8192µs
-			return sign * 4;
-		case 5: // 8192µs <= p < 16384µs
-			return sign * 5;
-		default:
-			return 0;
-	}
+	p = (p * sign) >> 9; // Divide pulse length (abs value) by 512
+	// there are 7 bits left in p representing the pulse length as a
+	// multiple of 512µs; map those into the above categories:
+	ASSERT(p <= B01111111);
+	static const uint8_t m[128] = {
+		1, // 0µs <= p < 512µs
+		2, 2, 2, // 512µs <= p < 2048µs
+		3, 3, 3, 3, // 2048µs <= p < 4096µs
+		4, 4, 4, 4, 4, 4, 4, 4, // 4096µs <= p < 8192µs
+		5, 5, 5, 5, 5, 5, 5, 5,
+		5, 5, 5, 5, 5, 5, 5, 5, // 8192µs <= p < 16384µs
+		// auto-initialized to 0 // 16384µs <= p
+	};
+	return m[p] * sign;
 }
 
 /*
