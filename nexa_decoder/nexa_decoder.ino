@@ -49,6 +49,7 @@
 RF433Transceiver rf_port(1);
 RingBuffer<char> rx_bits(1000);
 PulseParser pulse_parser(rx_bits);
+NexaCommand cmd;
 
 void setup()
 {
@@ -112,9 +113,16 @@ void parse_32bit_cmd(NexaCommand & cmd, const char buf[32])
 }
 
 /*
- * Parse data from ring buffer, and generate + print NexaCommands.
+ * Parse data from ring buffer, and generate NexaCommands.
+ *
+ * The function will consume (some, but not necessarily all) available
+ * data in the ring buffer.
+ *
+ * This function will not generate a NexaCommand every time it's called,
+ * but when it does, it will return true, and store the NexaCommand into
+ * the given object.
  */
-void decode_bits(RingBuffer<char> & rx_bits)
+bool decode_bits(NexaCommand & cmd, RingBuffer<char> & rx_bits)
 {
 	static NexaCommand::Version version = NexaCommand::NEXA_INVAL;
 	static char buf[32]; // Long enough for the longest command
@@ -137,34 +145,35 @@ void decode_bits(RingBuffer<char> & rx_bits)
 			buf[buf_pos++] = b;
 
 		if (expect && buf_pos == expect) { // all bits present
-			NexaCommand cmd;
 			if (version == NexaCommand::NEXA_12BIT)
 				parse_12bit_cmd(cmd, buf);
 			else if (version == NexaCommand::NEXA_32BIT)
 				parse_32bit_cmd(cmd, buf);
-#if DEBUG
-			Serial.println();
-#endif
-			cmd.print(Serial);
-			Serial.flush();
 
 			expect = 0;
 			buf_pos = 0;
 			version = NexaCommand::NEXA_INVAL;
+			return true;
 		}
 	}
+	return false;
 }
 
 void loop()
 {
 	pulse_parser(rf_port.rx_get_pulse());
 	if (!rx_bits.r_empty()) {
-		size_t len = rx_bits.r_buf_len();
-		do {
 #if DEBUG
-			Serial.write((const byte *) rx_bits.r_buf(), len);
+		Serial.write((const byte *) rx_bits.r_buf(),
+			     rx_bits.r_buf_len());
+		Serial.write((const byte *) rx_bits.r_wrapped_buf(),
+			     rx_bits.r_wrapped_buf_len());
 #endif
-			decode_bits(rx_bits);
-		} while (len = rx_bits.r_buf_len());
+		if (decode_bits(cmd, rx_bits)) {
+#if DEBUG
+			Serial.println();
+#endif
+			cmd.print(Serial);
+		}
 	}
 }
