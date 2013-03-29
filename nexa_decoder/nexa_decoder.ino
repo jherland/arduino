@@ -71,6 +71,7 @@ void loop()
 #if DEBUG
 			Serial.println();
 #endif
+			Serial.print("RX <- ");
 			cmd.print(Serial);
 		}
 	}

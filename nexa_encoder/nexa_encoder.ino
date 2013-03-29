@@ -11,8 +11,6 @@
 #include <RF433Transceiver.h>
 #include <NexaCommand.h>
 
-#define DEBUG 1
-
 // Adjust the following to match where the RF transmitter is connected.
 RF433Transceiver rf_port(1);
 
@@ -42,10 +40,10 @@ void loop()
 
 	NexaCommand cmd;
 	if (NexaCommand::from_cmd_str(cmd, cmd_buf, buf_read)) {
-		cmd.transmit(rf_port);
-#if DEBUG
-		Serial.print("Transmitted: ");
-		cmd.print(Serial);
-#endif
+		for (size_t i = 0; i < 5; i++) {
+			cmd.transmit(rf_port);
+			Serial.print("TX -> ");
+			cmd.print(Serial);
+		}
 	}
 }
