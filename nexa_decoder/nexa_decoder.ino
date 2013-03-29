@@ -112,7 +112,7 @@ void parse_32bit_cmd(NexaCommand & cmd, const char buf[32])
 }
 
 /*
- * Parse data form ring buffer, and generate + print NexaCommands.
+ * Parse data from ring buffer, and generate + print NexaCommands.
  */
 void decode_bits(RingBuffer<char> & rx_bits)
 {
@@ -142,6 +142,9 @@ void decode_bits(RingBuffer<char> & rx_bits)
 				parse_12bit_cmd(cmd, buf);
 			else if (version == NexaCommand::NEXA_32BIT)
 				parse_32bit_cmd(cmd, buf);
+#if DEBUG
+			Serial.println();
+#endif
 			cmd.print(Serial);
 			Serial.flush();
 
@@ -154,13 +157,12 @@ void decode_bits(RingBuffer<char> & rx_bits)
 
 void loop()
 {
-	if (pulse_parser(rf_port.rx_get_pulse()) &&
-	    !rx_bits.r_empty()) {
+	pulse_parser(rf_port.rx_get_pulse());
+	if (!rx_bits.r_empty()) {
 		size_t len = rx_bits.r_buf_len();
 		do {
 #if DEBUG
 			Serial.write((const byte *) rx_bits.r_buf(), len);
-			Serial.println();
 #endif
 			decode_bits(rx_bits);
 		} while (len = rx_bits.r_buf_len());
